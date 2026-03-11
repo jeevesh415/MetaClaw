@@ -41,6 +41,10 @@ class MetaClawConfig:
     prm_temperature: float = 0.6
     prm_max_new_tokens: int = 1024
     use_opd: bool = False                    # OPD (teacher logprobs) mode
+    teacher_url: str = ""                    # Teacher model base URL (OpenAI-compatible /v1/completions)
+    teacher_model: str = ""                  # Teacher model name
+    teacher_api_key: str = ""                # Teacher model API key
+    kl_penalty_coef: float = 1.0             # KL penalty coefficient for OPD
 
     # ------------------------------------------------------------------ #
     # Skills                                                              #

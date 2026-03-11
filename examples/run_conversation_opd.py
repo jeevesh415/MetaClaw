@@ -31,9 +31,13 @@ async def main():
         lora_rank=32,
         renderer_name="qwen3",
 
-        # OPD mode
+        # OPD mode — teacher model provides reference logprobs
         use_opd=True,
         loss_fn="cispo",
+        teacher_url="http://localhost:8082/v1",   # OpenAI-compatible completions endpoint
+        teacher_model="Qwen/Qwen3-32B",           # teacher (larger) model
+        teacher_api_key="",                        # set via env or directly
+        kl_penalty_coef=1.0,                       # KL penalty strength
 
         learning_rate=1e-4,
         batch_size=32,

@@ -65,6 +65,13 @@ After each conversation, the same LLM you're already using analyzes the session 
 ### **No GPU cluster required**
 In `skills_only` mode, only a network connection is needed. RL training is offloaded to Tinker cloud.
 
+### **Two learning modes**
+MetaClaw supports both:
+- **RL (GRPO)** for learning from implicit feedback signals
+- **On-Policy Distillation (OPD)** for distilling a larger teacher model into the student on-policy
+
+In OPD mode, the student generates responses as usual, and a teacher model provides per-token log-probabilities on those same responses. The teacher logprobs are passed to the loss function (e.g., `cispo`) so the student learns to match the teacher's distribution. The teacher must be served behind an OpenAI-compatible `/v1/completions` endpoint (e.g., vLLM, SGLang).
+
 ### **Asynchronous by design**
 Serving, reward modeling, and training are fully decoupled. The agent continues responding while scoring and optimization run in parallel.
 
@@ -159,6 +166,13 @@ rl:
   evolver_api_key: ""
   evolver_model: gpt-5.2
 
+opd:
+  enabled: false            # set to true to enable OPD (teacher distillation)
+  teacher_url: ""           # teacher model base URL (OpenAI-compatible /v1/completions)
+  teacher_model: ""         # teacher model name (e.g., Qwen/Qwen3-32B)
+  teacher_api_key: ""       # teacher model API key
+  kl_penalty_coef: 1.0      # KL penalty coefficient for OPD
+
 max_context_tokens: 20000   # prompt token cap before truncation
 ```
 
@@ -201,6 +215,24 @@ In RL mode:
 ```json
 {"task_id": "task_1", "instruction": "Register the webhook at https://example.com/hook"}
 ```
+
+---
+
+## 🔬 Advanced: OPD Mode
+
+On-Policy Distillation (OPD) lets you distill a larger teacher model into the student while it trains on-policy. The student generates responses as usual; the teacher provides per-token log-probabilities on those same responses. A KL penalty steers the student toward the teacher's distribution.
+
+```bash
+metaclaw config opd.enabled true
+metaclaw config opd.teacher_url http://localhost:8082/v1
+metaclaw config opd.teacher_model Qwen/Qwen3-32B
+metaclaw config opd.kl_penalty_coef 1.0
+metaclaw start --mode rl
+```
+
+The teacher must be served behind an OpenAI-compatible `/v1/completions` endpoint (e.g., vLLM, SGLang). OPD can be combined with PRM scoring — both run asynchronously.
+
+See `examples/run_conversation_opd.py` for a programmatic example and `scripts/run_openclaw_tinker_opd.sh` for a ready-made launch script.
 
 ---
 

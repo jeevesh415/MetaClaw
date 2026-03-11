@@ -60,6 +60,13 @@
 ### **无需 GPU 集群**
 `skills_only` 模式只需网络连接。RL 训练完全在 Tinker 云端运行。
 
+### **两种学习模式**
+MetaClaw 同时支持：
+- **RL（GRPO）** 用于隐式反馈信号
+- **On-Policy Distillation（OPD）** 用于将更大的教师模型蒸馏到学生模型
+
+OPD 模式下，学生模型正常生成回复，教师模型对相同回复提供逐 token 的 log-probability，传入损失函数（如 `cispo`）使学生逐步逼近教师分布。教师模型需部署在 OpenAI 兼容的 `/v1/completions` 端点（如 vLLM、SGLang）。
+
 ### **完全异步**
 推理服务、奖励打分、模型训练完全解耦。Agent 持续响应，学习在后台进行。
 
@@ -154,6 +161,13 @@ rl:
   evolver_api_key: ""
   evolver_model: gpt-5.2
 
+opd:
+  enabled: false            # 设为 true 开启 OPD（教师蒸馏）
+  teacher_url: ""           # 教师模型 base URL（OpenAI 兼容 /v1/completions）
+  teacher_model: ""         # 教师模型名称（如 Qwen/Qwen3-32B）
+  teacher_api_key: ""       # 教师模型 API key
+  kl_penalty_coef: 1.0      # OPD 的 KL 惩罚系数
+
 max_context_tokens: 20000   # 截断前的 prompt token 上限
 ```
 
@@ -196,6 +210,24 @@ RL 模式下：
 ```json
 {"task_id": "task_1", "instruction": "在 https://example.com/hook 注册 webhook"}
 ```
+
+---
+
+## 🔬 进阶：OPD 模式
+
+On-Policy Distillation（OPD）允许将更大的教师模型蒸馏到学生模型中。学生模型正常生成回复，教师模型对相同回复提供逐 token 的 log-probability。KL 惩罚引导学生逼近教师分布。
+
+```bash
+metaclaw config opd.enabled true
+metaclaw config opd.teacher_url http://localhost:8082/v1
+metaclaw config opd.teacher_model Qwen/Qwen3-32B
+metaclaw config opd.kl_penalty_coef 1.0
+metaclaw start --mode rl
+```
+
+教师模型需部署在 OpenAI 兼容的 `/v1/completions` 端点（如 vLLM、SGLang）。OPD 可与 PRM 打分同时使用，两者均异步运行。
+
+参考 `examples/run_conversation_opd.py` 获取编程示例，或使用 `scripts/run_openclaw_tinker_opd.sh` 快速启动。
 
 ---
 

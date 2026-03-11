@@ -50,9 +50,18 @@ class ConversationSample:
 # sample_to_datum                                                      #
 # ------------------------------------------------------------------ #
 
-def sample_to_datum(sample: ConversationSample, advantage: float):
+def sample_to_datum(
+    sample: ConversationSample,
+    advantage: float,
+    kl_penalty_coef: float = 0.0,
+):
     """
     Convert one ConversationSample + scalar advantage into a ``tinker.Datum``.
+
+    When ``sample.teacher_logprobs`` is present and *kl_penalty_coef* > 0,
+    a reverse-KL penalty (``-coef * (log p_student - log p_teacher)``) is
+    added to the per-token advantages, matching the tinker-cookbook OPD
+    convention (see ``tinker_cookbook/distillation/train_on_policy.py``).
 
     Returns
     -------
@@ -87,10 +96,19 @@ def sample_to_datum(sample: ConversationSample, advantage: float):
     )
 
     # advantages: 0 for prompt, advantage * loss_mask for response
-    advantages: list[float] = (
-        [0.0] * (prompt_len - 1)
-        + [advantage * float(m) for m in sample.loss_mask]
-    )
+    resp_advantages = [advantage * float(m) for m in sample.loss_mask]
+
+    # OPD: add reverse-KL penalty to response advantages.
+    # KL[student||teacher] = log p_student - log p_teacher
+    # We penalise divergence by subtracting coef * KL from the advantages.
+    if sample.teacher_logprobs is not None and kl_penalty_coef > 0:
+        for i in range(min(len(resp_advantages), len(sample.teacher_logprobs))):
+            student_lp = sample.response_logprobs[i] if i < len(sample.response_logprobs) else 0.0
+            teacher_lp = sample.teacher_logprobs[i]
+            kl_i = student_lp - teacher_lp
+            resp_advantages[i] += -kl_penalty_coef * kl_i * float(sample.loss_mask[i])
+
+    advantages: list[float] = [0.0] * (prompt_len - 1) + resp_advantages
 
     # mask: 0 for prompt, loss_mask value for response
     mask: list[float] = (
@@ -142,6 +160,11 @@ def sample_to_datum(sample: ConversationSample, advantage: float):
     # Build model input from all tokens except the last
     model_input = tinker.ModelInput.from_ints(all_tokens[:-1])
 
+    # Note: "mask" is NOT included in loss_fn_inputs.  The Tinker server
+    # rejects unknown keys (only target_tokens, logprobs, advantages, weights,
+    # clip_*_threshold are accepted).  The mask information is already encoded
+    # in the advantages (0.0 for prompt / masked positions).  The cookbook
+    # likewise strips mask via remove_mask() before calling forward_backward.
     return tinker.Datum(
         model_input=model_input,
         loss_fn_inputs={
@@ -154,9 +177,6 @@ def sample_to_datum(sample: ConversationSample, advantage: float):
             "advantages": TensorData.from_torch(
                 torch.tensor(advantages, dtype=torch.float32)
             ),
-            "mask": TensorData.from_torch(
-                torch.tensor(mask, dtype=torch.float32)
-            ),
         },
     )
 
@@ -168,6 +188,7 @@ def sample_to_datum(sample: ConversationSample, advantage: float):
 def batch_to_datums(
     batch: list[ConversationSample],
     advantages: list[float],
+    kl_penalty_coef: float = 0.0,
 ) -> list:
     """
     Convert a batch of samples + per-sample advantages to a list of Datums.
@@ -177,7 +198,7 @@ def batch_to_datums(
     datums = []
     for sample, adv in zip(batch, advantages):
         try:
-            datums.append(sample_to_datum(sample, adv))
+            datums.append(sample_to_datum(sample, adv, kl_penalty_coef=kl_penalty_coef))
         except Exception as e:
             logger.warning(
                 "[data_formatter] skipping sample session=%s turn=%d: %s",

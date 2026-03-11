@@ -31,6 +31,7 @@ from typing import Any, Optional
 import uvicorn
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from openai import OpenAI
 
 from .config import MetaClawConfig
 from .data_formatter import ConversationSample
@@ -355,10 +356,23 @@ class MetaClawAPIServer:
         self._turn_counts: dict[str, int] = {}
         self._pending_turn_data: dict[str, dict[int, dict]] = {}  # session → {turn → data}
         self._prm_tasks: dict[str, dict[int, asyncio.Task]] = {}  # session → {turn → task}
+        self._teacher_tasks: dict[str, dict[int, asyncio.Task]] = {}  # session → {turn → task} (OPD)
         self._pending_records: dict[str, dict] = {}               # for record logging
         self._session_effective: dict[str, int] = {}              # at-least-one guarantee
         # skills_only: buffer turns per session for skill evolution
         self._session_turns: dict[str, list] = {}
+
+        # OPD teacher model client
+        self._teacher_client: Optional[OpenAI] = None
+        if config.use_opd and config.teacher_url:
+            self._teacher_client = OpenAI(
+                base_url=config.teacher_url,
+                api_key=config.teacher_api_key or "unused",
+            )
+            logger.info("[OpenClaw] OPD teacher client ready: url=%s model=%s",
+                        config.teacher_url, config.teacher_model)
+        elif config.use_opd and not config.teacher_url:
+            logger.warning("[OpenClaw] use_opd=True but teacher_url is empty — teacher logprobs disabled")
 
         # Record files
         self._record_file = ""
@@ -579,6 +593,65 @@ class MetaClawAPIServer:
             td["has_next_state"] = True
 
     # ------------------------------------------------------------------ #
+    # OPD teacher logprobs                                                 #
+    # ------------------------------------------------------------------ #
+
+    async def _query_teacher_logprobs(
+        self, prompt_text: str, response_text: str, num_response_tokens: int
+    ) -> list[float]:
+        """Query teacher model for per-token logprobs on the student's response.
+
+        Uses the OpenAI-compatible ``/v1/completions`` endpoint with ``echo=True``
+        and ``max_tokens=0`` to obtain the teacher's log-probabilities for each
+        token of the student's generated response without producing new tokens.
+        """
+        full_text = prompt_text + response_text
+
+        response = await asyncio.to_thread(
+            self._teacher_client.completions.create,
+            model=self.config.teacher_model,
+            prompt=full_text,
+            echo=True,
+            logprobs=1,
+            max_tokens=0,
+        )
+
+        choice = response.choices[0]
+        token_logprobs = choice.logprobs.token_logprobs or []
+
+        # Find where response tokens start (use student tokenizer as reference)
+        prompt_token_count = len(
+            self._tokenizer(prompt_text, add_special_tokens=False)["input_ids"]
+        )
+
+        teacher_lps = [
+            float(lp) if lp is not None else 0.0
+            for lp in token_logprobs[prompt_token_count:]
+        ]
+
+        # Align to student's response token count
+        if len(teacher_lps) > num_response_tokens:
+            teacher_lps = teacher_lps[:num_response_tokens]
+        elif len(teacher_lps) < num_response_tokens:
+            teacher_lps = teacher_lps + [0.0] * (num_response_tokens - len(teacher_lps))
+
+        return teacher_lps
+
+    def _fire_teacher_query(
+        self, session_id: str, turn_num: int,
+        prompt_text: str, response_text: str, num_response_tokens: int,
+    ):
+        """Fire an async teacher-logprobs query (OPD mode)."""
+        task = asyncio.create_task(
+            self._query_teacher_logprobs(prompt_text, response_text, num_response_tokens)
+        )
+        task.add_done_callback(self._task_done_cb)
+        task.add_done_callback(
+            lambda _t: self._maybe_submit_ready_samples(session_id)
+        )
+        self._teacher_tasks.setdefault(session_id, {})[turn_num] = task
+
+    # ------------------------------------------------------------------ #
     # Request handling                                                     #
     # ------------------------------------------------------------------ #
 
@@ -787,6 +860,10 @@ class MetaClawAPIServer:
                     }
                 )
             self._pending_turn_data.setdefault(session_id, {})[turn_num] = turn_data
+            if self.config.use_opd and self._teacher_client:
+                self._fire_teacher_query(
+                    session_id, turn_num, prompt_text, response_text, len(response_ids),
+                )
             self._maybe_submit_ready_samples(session_id)
         else:
             logger.info("[OpenClaw] SIDE session=%s → skipped (no training data)", session_id)
@@ -796,6 +873,7 @@ class MetaClawAPIServer:
             self._maybe_submit_ready_samples(session_id, force_no_prm=True)
             eff = self._session_effective.pop(session_id, 0)
             self._turn_counts.pop(session_id, None)
+            self._teacher_tasks.pop(session_id, None)
             logger.info("[OpenClaw] session=%s done → cleaned up (effective_samples=%d)", session_id, eff)
             # skills_only: trigger async skill evolution from this session's turns
             turns = self._session_turns.pop(session_id, [])
@@ -1085,31 +1163,50 @@ class MetaClawAPIServer:
     def _maybe_submit_ready_samples(
         self, session_id: str, force_no_prm: bool = False
     ):
-        """Submit turns whose PRM is done (or PRM not needed).
+        """Submit turns whose PRM and teacher queries are done.
 
         force_no_prm: also submit turns that have no PRM task yet (used at
         session end for the last turn which will never get a next_state).
+        When force is active, pending teacher tasks are also skipped.
         """
         prm_tasks = self._prm_tasks.get(session_id, {})
+        teacher_tasks = self._teacher_tasks.get(session_id, {})
         pending = self._pending_turn_data.get(session_id, {})
         for turn_num in sorted(list(pending.keys())):
-            task = prm_tasks.get(turn_num)
+            # --- PRM readiness ---
+            prm_task = prm_tasks.get(turn_num)
             if not self.config.use_prm or not self.prm_scorer:
                 pass  # no PRM → submit immediately
-            elif task is not None and not task.done():
+            elif prm_task is not None and not prm_task.done():
                 continue  # PRM still running
-            elif task is None and not force_no_prm:
+            elif prm_task is None and not force_no_prm:
                 continue  # waiting for next_state to fire PRM
+
+            # --- Teacher readiness (OPD) ---
+            teacher_task = teacher_tasks.get(turn_num)
+            if (self.config.use_opd and teacher_task is not None
+                    and not teacher_task.done() and not force_no_prm):
+                continue  # teacher logprobs still running
+
             turn_data = pending.pop(turn_num)
             prm_result = None
-            if task is not None and task.done():
+            if prm_task is not None and prm_task.done():
                 try:
-                    prm_result = task.result()
+                    prm_result = prm_task.result()
                 except Exception:
                     pass
                 prm_tasks.pop(turn_num, None)
+
+            teacher_logprobs = None
+            if teacher_task is not None and teacher_task.done():
+                try:
+                    teacher_logprobs = teacher_task.result()
+                except Exception:
+                    pass
+                teacher_tasks.pop(turn_num, None)
+
             self._safe_create_task(
-                self._submit_turn_sample(turn_data, session_id, prm_result)
+                self._submit_turn_sample(turn_data, session_id, prm_result, teacher_logprobs)
             )
 
     async def _submit_turn_sample(
@@ -1117,6 +1214,7 @@ class MetaClawAPIServer:
         turn_data: dict[str, Any],
         session_id: str,
         prm_result: Optional[dict],
+        teacher_logprobs: Optional[list[float]] = None,
     ):
         prompt_ids = turn_data["prompt_ids"]
         response_ids = turn_data["response_ids"]
@@ -1144,6 +1242,7 @@ class MetaClawAPIServer:
             reward=score,
             prompt_text=turn_data.get("prompt_text", ""),
             response_text=turn_data.get("response_text", ""),
+            teacher_logprobs=teacher_logprobs,
         )
 
         if not exclude:

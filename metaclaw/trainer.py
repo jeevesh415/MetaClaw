@@ -167,7 +167,8 @@ class MetaClawTrainer:
 
         # Compute advantages (centre-normalise within batch)
         advantages = compute_advantages(batch)
-        data_D = batch_to_datums(batch, advantages)
+        kl_coef = self.config.kl_penalty_coef if self.config.use_opd else 0.0
+        data_D = batch_to_datums(batch, advantages, kl_penalty_coef=kl_coef)
 
         if not data_D:
             logger.warning("[Trainer] empty data batch — skipping step")
