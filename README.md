@@ -62,7 +62,7 @@ Just talk to your agent as usual, and MetaClaw handles the learning loop behind 
 
 It wraps your model behind an OpenAI-compatible proxy, intercepts interactions from OpenClaw, injects relevant skills at every turn, and optionally fine-tunes the model continuously via Tinker cloud RL. Updated weights are hot-swapped with no service interruption.
 
-There is no need to maintain a dedicated GPU cluster. MetaClaw works with any OpenAI-compatible LLM API out of the box, and optionally integrates **Kimi-K2.5** (~200B MoE) via [Tinker](https://www.thinkingmachines.ai/tinker/) for cloud-based LoRA training.
+There is no need to maintain a dedicated GPU cluster. MetaClaw works with any OpenAI-compatible LLM API out of the box, and optionally integrates **Kimi-K2.5** (1T MoE) via [Tinker](https://www.thinkingmachines.ai/tinker/) for cloud-based LoRA training.
 
 ## 🤖 Key Features
 
