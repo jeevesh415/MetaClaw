@@ -33,8 +33,9 @@
 
 ```bash
 metaclaw setup              # assistant de configuration initial
-metaclaw start              # skills injectés · OpenClaw configuré · prêt à chatter
-metaclaw start --mode rl    # optionnel : + entraînement RL en direct via Tinker
+metaclaw start              # par défaut : mode auto — skills + entraînement RL planifié
+metaclaw start --mode rl    # RL sans planificateur (entraîne dès qu'un batch est plein)
+metaclaw start --mode skills_only  # skills uniquement, pas de RL (Tinker non requis)
 ```
 
 <img src="metaclaw.gif" alt="Démo MetaClaw" width="700">
@@ -93,8 +94,9 @@ C'est tout. MetaClaw démarre le proxy, configure automatiquement OpenClaw et re
 
 ```
 metaclaw setup              # Assistant de configuration initial
-metaclaw start              # Démarrer MetaClaw (proxy + RL optionnel)
-metaclaw start --mode rl    # Forcer le mode RL pour cette session
+metaclaw start              # Démarrer MetaClaw (par défaut : mode auto)
+metaclaw start --mode rl    # Forcer le mode RL (sans planificateur) pour cette session
+metaclaw start --mode skills_only  # Forcer le mode skills uniquement
 metaclaw stop               # Arrêter une instance MetaClaw en cours
 metaclaw status             # Vérifier l'état du proxy et le mode actif
 metaclaw config show        # Afficher la configuration actuelle
@@ -117,7 +119,7 @@ metaclaw config proxy.port 31000          # Changer le port du proxy
 La configuration est stockée dans `~/.metaclaw/config.yaml`, créé par `metaclaw setup`.
 
 ```yaml
-mode: skills_only          # "skills_only" | "rl"
+mode: auto                 # "auto" | "rl" | "skills_only"
 
 llm:
   provider: kimi            # kimi | qwen | openai | custom

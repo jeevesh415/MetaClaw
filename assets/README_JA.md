@@ -33,8 +33,9 @@
 
 ```bash
 metaclaw setup              # 初回設定ウィザード
-metaclaw start              # スキル注入・OpenClaw 自動設定・チャット開始
-metaclaw start --mode rl    # オプション：+ Tinker でライブ RL トレーニング
+metaclaw start              # デフォルト: auto モード — スキル + スケジュール RL トレーニング
+metaclaw start --mode rl    # スケジューラなし RL（バッチが満たされ次第即時トレーニング）
+metaclaw start --mode skills_only  # スキルのみ、RL なし（Tinker 不要）
 ```
 
 <img src="metaclaw.gif" alt="MetaClaw デモ" width="700">
@@ -93,8 +94,9 @@ metaclaw start
 
 ```
 metaclaw setup              # 初回設定ウィザード
-metaclaw start              # MetaClaw 起動（プロキシ + オプション RL）
-metaclaw start --mode rl    # このセッションを RL モードで強制起動
+metaclaw start              # MetaClaw 起動（デフォルト: auto モード）
+metaclaw start --mode rl    # このセッションを RL モードで強制起動（スケジューラなし）
+metaclaw start --mode skills_only  # このセッションをスキルのみモードで起動
 metaclaw stop               # 実行中の MetaClaw を停止
 metaclaw status             # プロキシの状態と実行モードを確認
 metaclaw config show        # 現在の設定を表示
@@ -117,7 +119,7 @@ metaclaw config proxy.port 31000          # プロキシポートを変更
 設定は `~/.metaclaw/config.yaml` に保存されます（`metaclaw setup` で生成）。
 
 ```yaml
-mode: skills_only          # "skills_only" | "rl"
+mode: auto                 # "auto" | "rl" | "skills_only"
 
 llm:
   provider: kimi            # kimi | qwen | openai | custom

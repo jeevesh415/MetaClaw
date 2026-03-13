@@ -32,8 +32,9 @@
 
 ```bash
 metaclaw setup              # one-time config wizard
-metaclaw start              # skills on, OpenClaw wired — ready to chat
-metaclaw start --mode rl    # optional: + live RL training via Tinker
+metaclaw start              # default: auto mode — skills + scheduled RL training
+metaclaw start --mode rl    # RL without scheduler (trains immediately on full batch)
+metaclaw start --mode skills_only  # skills only, no RL (no Tinker needed)
 ```
 
 <div align="center">
@@ -70,16 +71,17 @@ There is no need to maintain a dedicated GPU cluster. MetaClaw works with any Op
 ### **One-click deployment**
 Configure once with `metaclaw setup`, then `metaclaw start` brings up the proxy, injects skills, and wires OpenClaw automatically. No manual shell scripts needed.
 
-### **Two operating modes**
+### **Three operating modes**
 
 | Mode | Default | What it does |
 |------|---------|--------------|
-| `skills_only` | ✅ | Proxy → your LLM API. Skills injected, auto-summarized after each session. No GPU/Tinker required. |
-| `rl` | off | Proxy → Tinker cloud RL. Full training loop with PRM scoring and skill evolution from failures. |
+| `auto` | ✅ | RL + smart scheduler. Skills always on; RL weight updates only run during sleep/idle/meeting windows. |
+| `rl` | — | RL without scheduler. Trains immediately when a batch is full (original v0.2 behavior). |
+| `skills_only` | — | Proxy → your LLM API. Skills injected, auto-summarized. No GPU/Tinker required. |
 
-### **Meta-learning update scheduler** *(v0.3, RL mode only)*
+### **Meta-learning update scheduler** *(auto mode)*
 
-Slow RL weight updates (which pause the agent for several minutes) are now gated by a smart scheduler inspired by the MAML meta-learning framework:
+In `auto` mode, slow RL weight updates are gated by a scheduler inspired by the MAML meta-learning framework:
 
 - **Inner loop (fast)** — skill files are updated immediately after each session, always on
 - **Outer loop (slow)** — RL gradient updates only run during user-inactive windows
@@ -92,7 +94,7 @@ Three conditions trigger an update window (any one is sufficient):
 | System idle | User has been away from keyboard for N minutes (macOS: `ioreg`; Linux: `xprintidle`) |
 | Google Calendar | Current time falls inside a calendar event — user is in a meeting |
 
-The agent continues running and serving requests throughout; only the expensive `save_weights` step is deferred to idle windows.
+The agent continues serving requests throughout; only the expensive `save_weights` step is deferred to idle windows.
 
 ### **Skill injection**
 At every turn, MetaClaw retrieves the most relevant skill instructions and injects them into the agent's system prompt. Immediate behavior improvement without retraining.
@@ -149,8 +151,9 @@ That's it. MetaClaw starts the proxy, automatically configures OpenClaw to use i
 
 ```
 metaclaw setup                  # Interactive first-time configuration wizard
-metaclaw start                  # Start MetaClaw (proxy + optional RL)
-metaclaw start --mode rl        # Force RL mode for this session
+metaclaw start                  # Start MetaClaw (default: auto mode)
+metaclaw start --mode rl        # Force RL mode (no scheduler) for this session
+metaclaw start --mode skills_only  # Force skills-only mode for this session
 metaclaw stop                   # Stop a running MetaClaw instance
 metaclaw status                 # Check proxy health, running mode, and scheduler state
 metaclaw config show            # View current configuration
@@ -178,7 +181,7 @@ metaclaw config proxy.port 31000          # Change proxy port
 Configuration lives in `~/.metaclaw/config.yaml`, created by `metaclaw setup`.
 
 ```yaml
-mode: skills_only          # "skills_only" | "rl"
+mode: auto                 # "auto" | "rl" | "skills_only"
 
 llm:
   provider: kimi            # kimi | qwen | openai | custom
@@ -220,8 +223,8 @@ opd:
 
 max_context_tokens: 20000   # prompt token cap before truncation
 
-scheduler:                  # v0.3: meta-learning scheduler (RL mode only)
-  enabled: false            # set to true to restrict RL updates to idle windows
+scheduler:                  # v0.3: meta-learning scheduler (auto-enabled in auto mode)
+  enabled: false            # auto mode enables this automatically; set manually for rl mode
   sleep_start: "23:00"      # HH:MM local time — start of sleep window
   sleep_end: "07:00"        # HH:MM local time — end of sleep window
   idle_threshold_minutes: 30  # trigger RL after N minutes of keyboard inactivity
@@ -296,14 +299,14 @@ See `examples/run_conversation_opd.py` for a programmatic example and `scripts/r
 
 ### Motivation
 
-In RL mode, `save_weights_and_get_sampling_client` (the weight hot-swap step) pauses the agent for several minutes. Running this during active usage degrades the user experience. v0.3 introduces a scheduler that defers this step to idle windows.
+In RL mode, `save_weights_and_get_sampling_client` (the weight hot-swap step) pauses the agent for several minutes. Running this during active usage degrades the user experience. The `auto` mode (default since v0.3) enables the scheduler automatically.
 
 ### How to enable
 
-Run `metaclaw setup` and answer yes to the scheduler questions, or set config values directly:
+The scheduler is enabled by default in `auto` mode. For manual control in `rl` mode, set config values directly:
 
 ```bash
-# Enable scheduler
+# Enable scheduler (already on in auto mode)
 metaclaw config scheduler.enabled true
 metaclaw config scheduler.sleep_start "23:00"
 metaclaw config scheduler.sleep_end   "07:00"
@@ -316,7 +319,7 @@ metaclaw config scheduler.calendar.credentials_path ~/.metaclaw/client_secrets.j
 metaclaw setup   # triggers Google Calendar device flow OAuth
 ```
 
-Once running in RL mode, you can monitor the scheduler:
+Once running in `auto` or `rl` mode with scheduler enabled, you can monitor it:
 
 ```bash
 metaclaw status                 # shows scheduler state inline

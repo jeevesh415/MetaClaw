@@ -33,8 +33,9 @@
 
 ```bash
 metaclaw setup              # 一次性配置向导
-metaclaw start              # Skills 注入，OpenClaw 自动接管，开始对话
-metaclaw start --mode rl    # 可选：+ Tinker 云端实时 RL 训练
+metaclaw start              # 默认 auto 模式：Skills + 定时 RL 训练
+metaclaw start --mode rl    # 无调度器 RL（batch 满即训练）
+metaclaw start --mode skills_only  # 仅 Skills，无 RL（无需 Tinker）
 ```
 
 <img src="metaclaw.gif" alt="MetaClaw 演示" width="700">
@@ -70,12 +71,13 @@ https://github.com/user-attachments/assets/1c2919fc-5612-40f7-bb97-c74ab50619d5
 ### **一键部署**
 运行 `metaclaw setup` 完成一次配置，之后只需 `metaclaw start` 即可启动代理、注入 Skill、自动配置 OpenClaw，无需手动执行任何 Shell 脚本。
 
-### **两种运行模式**
+### **三种运行模式**
 
 | 模式 | 默认 | 功能 |
 |------|------|------|
-| `skills_only` | ✅ | 代理 → 你的 LLM API。注入 Skill，会话结束后自动总结。无需 GPU / Tinker。 |
-| `rl` | 关闭 | 代理 → Tinker 云端 RL。完整训练循环，PRM 打分 + Skill 自动进化。 |
+| `auto` | ✅ | RL + 智能调度器。Skill 持续注入；RL 权重更新只在睡眠/空闲/会议窗口进行。 |
+| `rl` | — | 无调度器 RL。batch 满后立即训练（v0.2 行为）。 |
+| `skills_only` | — | 代理 → 你的 LLM API。注入 Skill，自动总结。无需 GPU / Tinker。 |
 
 ### **Skill 注入**
 每轮对话时自动检索最相关的 Skill 指令注入 system prompt，无需重新训练即可立即改善 Agent 行为。
@@ -130,8 +132,9 @@ metaclaw start
 
 ```
 metaclaw setup              # 交互式首次配置向导
-metaclaw start              # 启动 MetaClaw（代理 + 可选 RL）
-metaclaw start --mode rl    # 本次会话强制使用 RL 模式
+metaclaw start              # 启动 MetaClaw（默认 auto 模式）
+metaclaw start --mode rl    # 本次会话强制 RL 模式（无调度器）
+metaclaw start --mode skills_only  # 本次会话强制仅 Skills 模式
 metaclaw stop               # 停止运行中的 MetaClaw
 metaclaw status             # 查看代理健康状态和运行模式
 metaclaw config show        # 查看当前完整配置
@@ -154,7 +157,7 @@ metaclaw config proxy.port 31000          # 修改代理端口
 配置存储在 `~/.metaclaw/config.yaml`，由 `metaclaw setup` 创建。
 
 ```yaml
-mode: skills_only          # "skills_only" | "rl"
+mode: auto                 # "auto" | "rl" | "skills_only"
 
 llm:
   provider: kimi            # kimi | qwen | openai | custom

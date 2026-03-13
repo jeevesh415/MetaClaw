@@ -33,8 +33,9 @@
 
 ```bash
 metaclaw setup              # 최초 설정 마법사
-metaclaw start              # 스킬 주입 · OpenClaw 자동 연결 · 대화 시작
-metaclaw start --mode rl    # 선택 사항: + Tinker 클라우드 실시간 RL 학습
+metaclaw start              # 기본: auto 모드 — 스킬 + 예약된 RL 학습
+metaclaw start --mode rl    # 스케줄러 없는 RL (배치가 차면 즉시 학습)
+metaclaw start --mode skills_only  # 스킬만, RL 없음 (Tinker 불필요)
 ```
 
 <img src="metaclaw.gif" alt="MetaClaw 데모" width="700">
@@ -93,8 +94,9 @@ metaclaw start
 
 ```
 metaclaw setup              # 최초 설정 마법사
-metaclaw start              # MetaClaw 시작 (프록시 + 선택적 RL)
-metaclaw start --mode rl    # 이 세션을 RL 모드로 강제 실행
+metaclaw start              # MetaClaw 시작 (기본: auto 모드)
+metaclaw start --mode rl    # 이 세션을 RL 모드로 강제 실행 (스케줄러 없음)
+metaclaw start --mode skills_only  # 이 세션을 스킬 전용 모드로 실행
 metaclaw stop               # 실행 중인 MetaClaw 중지
 metaclaw status             # 프록시 상태 및 실행 모드 확인
 metaclaw config show        # 현재 전체 설정 보기
@@ -117,7 +119,7 @@ metaclaw config proxy.port 31000          # 프록시 포트 변경
 설정은 `~/.metaclaw/config.yaml`에 저장되며 `metaclaw setup`으로 생성됩니다.
 
 ```yaml
-mode: skills_only          # "skills_only" | "rl"
+mode: auto                 # "auto" | "rl" | "skills_only"
 
 llm:
   provider: kimi            # kimi | qwen | openai | custom
