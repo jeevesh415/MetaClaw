@@ -6,7 +6,9 @@
 
 # Just talk to your agent — it learns and *EVOLVES*.
 
-<p>Inspired by how the brain learns. Meta-learn and evolve your 🦞 from every conversation in the wild. No GPU required. Works with Kimi, Qwen, Claude, MiniMax, and more. Supports OpenClaw, CoPaw, IronClaw, PicoClaw, ZeroClaw, NanoClaw, and NemoClaw.</p>
+<p>Inspired by how the brain learns. Meta-learn and evolve your 🦞 from every conversation in the wild. No GPU required. 
+  
+  Works with Kimi, Qwen, Claude, MiniMax, and more. Supports OpenClaw, CoPaw, IronClaw, PicoClaw, ZeroClaw, NanoClaw, and NemoClaw.</p>
 
 🦞 Supported Personal Agents
 
