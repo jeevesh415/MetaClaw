@@ -43,6 +43,8 @@
 ```bash
 metaclaw setup              # one-time config wizard
 metaclaw start              # default: madmax mode — skills + scheduled RL training
+metaclaw start --daemon     # run in background, logs -> ~/.metaclaw/metaclaw.log
+metaclaw start --daemon --log-file /tmp/metaclaw.log  # custom daemon log path
 metaclaw start --mode rl    # RL without scheduler (trains immediately on full batch)
 metaclaw start --mode skills_only  # skills only, no RL (no Tinker needed)
 ```
@@ -217,6 +219,8 @@ Configuration lives in `~/.metaclaw/config.yaml`, created by `metaclaw setup`.
 ```
 metaclaw setup                  # Interactive first-time configuration wizard
 metaclaw start                  # Start MetaClaw (default: madmax mode)
+metaclaw start --daemon         # Start MetaClaw in background
+metaclaw start --daemon --log-file /tmp/metaclaw.log  # Custom daemon log path
 metaclaw start --mode rl        # Force RL mode (no scheduler) for this session
 metaclaw start --mode skills_only  # Force skills-only mode for this session
 metaclaw stop                   # Stop a running MetaClaw instance
@@ -224,6 +228,8 @@ metaclaw status                 # Check proxy health, running mode, and schedule
 metaclaw config show            # View current configuration
 metaclaw config KEY VALUE       # Set a config value
 ```
+
+When you start MetaClaw with `--daemon`, the command waits until the local proxy becomes healthy before returning. Use `metaclaw status` to verify readiness and `metaclaw stop` to stop the background process.
 
 <details>
 <summary><b>Full config reference (click to expand)</b></summary>
