@@ -7,10 +7,11 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 
 /** Directory where this plugin lives — the .venv is created here. */
-const PLUGIN_DIR = path.dirname(new URL(import.meta.url).pathname);
+const PLUGIN_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 type MetaClawPluginConfig = {
   sessionIdHeader: string;
@@ -264,7 +265,8 @@ function trySpawnMetaclaw(api: OpenClawPluginApi, full: MetaClawPluginConfig, ve
   }
 
   // Use venv Python for metaclaw unless user set a custom command
-  const cmd = full.metaclawCommand;
+  const rawCmd = full.metaclawCommand;
+  const cmd = process.platform === "win32" ? `"${rawCmd}"` : rawCmd;
   const args = full.metaclawStartArgs;
 
   try {
@@ -424,7 +426,8 @@ function runVenvSetupThenMaybeStart(api: OpenClawPluginApi, full: MetaClawPlugin
     `metaclaw-openclaw: running pip install (first run may take minutes)…`,
   );
 
-  const pip = spawn(venvPy, args, {
+  const pipCmd = process.platform === "win32" ? `"${venvPy}"` : venvPy;
+  const pip = spawn(pipCmd, args, {
     shell: process.platform === "win32",
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, PYTHONUNBUFFERED: "1" },
