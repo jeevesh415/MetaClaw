@@ -445,23 +445,46 @@ function runVenvSetupThenMaybeStart(api: OpenClawPluginApi, full: MetaClawPlugin
     return;
   }
 
-  // Step 2: skip pip if metaclaw is already importable in the venv (gateway restart / onboard)
-  const alreadyInstalled = spawnSync(venvPy, ["-c", "import metaclaw"], {
-    encoding: "utf8",
-    timeout: 10_000,
-  }).status === 0;
+  // Step 2: check if metaclaw is already installed and up-to-date
+  const versionCheck = spawnSync(venvPy, [
+    "-c",
+    "import metaclaw; print(getattr(metaclaw, '__version__', '0.0.0'))",
+  ], { encoding: "utf8", timeout: 10_000 });
 
-  if (alreadyInstalled) {
-    // Already installed — skip pip, still run post-install steps
-    installMetaclawWrapper(api, full.venvPath);
-    autoInstallWechatBridge(api, full);
-    if (full.autoStartMetaclaw) {
-      trySpawnMetaclaw(api, full, venvPy);
+  const installedVersion = versionCheck.status === 0 ? versionCheck.stdout.trim() : null;
+
+  if (installedVersion) {
+    // Check if PyPI has a newer version — quick pip index check
+    const indexCheck = spawnSync(venvPy, [
+      "-m", "pip", "index", "versions", full.pipInstallSpec.replace(/\[.*\]$/, ""),
+      "--index-url", "https://pypi.org/simple/",
+      "--extra-index-url", "https://pypi.tuna.tsinghua.edu.cn/simple/",
+    ], { encoding: "utf8", timeout: 30_000 });
+
+    let latestVersion: string | null = null;
+    if (indexCheck.status === 0 && indexCheck.stdout) {
+      // Output format: "aiming-metaclaw (0.4.0)\nAvailable versions: ..."
+      const m = indexCheck.stdout.match(/\(([^)]+)\)/);
+      if (m) latestVersion = m[1];
     }
-    return;
+
+    if (!latestVersion || latestVersion === installedVersion) {
+      // Already up-to-date — skip pip, still run post-install steps
+      api.logger.debug?.(`metaclaw-openclaw: already up-to-date (${installedVersion})`);
+      installMetaclawWrapper(api, full.venvPath);
+      autoInstallWechatBridge(api, full);
+      if (full.autoStartMetaclaw) {
+        trySpawnMetaclaw(api, full, venvPy);
+      }
+      return;
+    }
+
+    api.logger.info(
+      `metaclaw-openclaw: upgrade available (${installedVersion} → ${latestVersion}), updating…`,
+    );
   }
 
-  // First install — run pip
+  // Install or upgrade via pip
   const args = [
     "-m",
     "pip",
@@ -473,7 +496,7 @@ function runVenvSetupThenMaybeStart(api: OpenClawPluginApi, full: MetaClawPlugin
     ...full.pipExtraArgs,
     full.pipInstallSpec,
   ];
-  api.logger.info("metaclaw-openclaw: installing…");
+  api.logger.info(installedVersion ? "metaclaw-openclaw: upgrading…" : "metaclaw-openclaw: installing…");
 
   const pip = spawn(venvPy, args, {
     shell: process.platform === "win32",

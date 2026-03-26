@@ -12,6 +12,13 @@ Quick start:
     metaclaw start    # one-click launch
 """
 
+from importlib.metadata import version as _pkg_version
+
+try:
+    __version__ = _pkg_version("aiming-metaclaw")
+except Exception:
+    __version__ = "0.0.0"
+
 from .config import MetaClawConfig
 from .config_store import ConfigStore
 from .api_server import MetaClawAPIServer

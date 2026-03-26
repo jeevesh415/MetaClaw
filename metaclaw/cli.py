@@ -273,10 +273,9 @@ def wechat_bridge_cmd(config: str | None):
     help="Config YAML (default: ~/.metaclaw/config.yaml).",
 )
 def wechat_relogin_cmd(config: str | None):
-    """Run the WeChat bridge and **force a QR login** for this run (new account / refresh).
+    """Force a QR login to switch WeChat account, save the session, then exit.
 
-    Same as ``wechat-bridge`` but ignores the saved session so you can scan again.
-    Does not change config; ``metaclaw start`` still prefers the saved session afterward.
+    After scanning, ``metaclaw start`` will pick up the new session automatically.
     """
     from pathlib import Path
 
@@ -292,14 +291,20 @@ def wechat_relogin_cmd(config: str | None):
         click.echo("No config found. Run 'metaclaw setup' first.", err=True)
         sys.exit(1)
     cfg = cs.to_metaclaw_config()
-    proc = spawn_wechat_bridge(cfg, relogin=True)
+    proc = spawn_wechat_bridge(cfg, login_only=True)
     if proc is None:
         sys.exit(1)
     try:
-        proc.wait()
+        ret = proc.wait()
     except KeyboardInterrupt:
         proc.terminate()
-        click.echo("\nWeChat bridge stopped.")
+        click.echo("\nWeChat login cancelled.")
+        sys.exit(1)
+    if ret == 0:
+        click.echo("WeChat session saved. Run 'metaclaw start' to go online.")
+    else:
+        click.echo(f"WeChat login exited with code {ret}.", err=True)
+        sys.exit(ret)
 
 
 @metaclaw.command("wechat-check")

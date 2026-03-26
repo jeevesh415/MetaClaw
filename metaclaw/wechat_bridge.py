@@ -49,12 +49,19 @@ def spawn_wechat_bridge(
     cfg: "MetaClawConfig",
     *,
     relogin: bool = False,
+    login_only: bool = False,
 ) -> Optional[subprocess.Popen]:
     """Start ``node bridge.mjs`` if dependencies are installed. Returns None on skip/failure.
 
     ``relogin=True`` forces a QR login for this run (switch account / refresh token); normal
     ``metaclaw start`` always tries the saved session first.
+
+    ``login_only=True`` (implies ``relogin``) makes the bridge exit right after the QR login
+    succeeds and the session is saved — useful for ``metaclaw wechat-relogin`` so the user
+    can scan once and then run ``metaclaw start`` separately.
     """
+    if login_only:
+        relogin = True
     root, issues = wechat_bridge_dependency_issues(cfg)
     if issues:
         for line in issues:
@@ -72,6 +79,8 @@ def spawn_wechat_bridge(
     env["METACLAW_API_KEY"] = api_key
     if relogin:
         env["METACLAW_WECHAT_FORCE_LOGIN"] = "1"
+    if login_only:
+        env["METACLAW_WECHAT_LOGIN_ONLY"] = "1"
 
     try:
         proc = subprocess.Popen(

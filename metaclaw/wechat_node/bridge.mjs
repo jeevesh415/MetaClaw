@@ -137,6 +137,10 @@ const forceLogin =
   process.env.METACLAW_WECHAT_FORCE_LOGIN === "1" ||
   /^(true|yes|on)$/i.test(process.env.METACLAW_WECHAT_FORCE_LOGIN || "");
 
+const loginOnly =
+  process.env.METACLAW_WECHAT_LOGIN_ONLY === "1" ||
+  /^(true|yes|on)$/i.test(process.env.METACLAW_WECHAT_LOGIN_ONLY || "");
+
 async function main() {
   if (!forceLogin) {
     try {
@@ -152,6 +156,10 @@ async function main() {
   }
   const accountId = await withTranslatedStdoutDuringLogin(() => login({ log: sdkLog }));
   console.log("[MetaClaw-WeChat] Logged in, accountId:", accountId);
+  if (loginOnly) {
+    console.log("[MetaClaw-WeChat] Login-only mode: session saved. Exiting.");
+    process.exit(0);
+  }
   await start({ chat }, { accountId, log: sdkLogDebug });
 }
 
