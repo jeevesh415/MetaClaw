@@ -1,1 +1,0 @@
-Today's tasks: (1) write a log parsing utility script, (2) write a data validation module, (3) write a report generation script, (4) refactor the existing config loader.

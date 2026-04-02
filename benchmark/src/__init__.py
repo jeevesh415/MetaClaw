@@ -1,1 +1,0 @@
-"""MetaClaw Evolution Benchmark utilities."""
