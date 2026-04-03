@@ -510,6 +510,14 @@ metaclaw config memory.sidecar_url http://127.0.0.1:30001
 
 ---
 
+## 📊 Benchmark
+
+The MetaClaw-Bench evaluates how well AI agents learn and adapt from multi-day interaction histories. It ships two dataset variants (30-day full and 12-day small) with a CLI that covers the full pipeline — validation, inference, scoring, and reporting.
+
+See [`benchmark/README.md`](benchmark/README.md) for setup and usage.
+
+---
+
 ## 📚 Citation
 
 ```bibtex
