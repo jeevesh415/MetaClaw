@@ -2,6 +2,8 @@ import type {
   HealthResponse,
   RetrieveResponse,
   IngestResponse,
+  BufferTurnResponse,
+  FlushSessionResponse,
   SearchResult,
   StoreResponse,
   StatsResponse,
@@ -49,6 +51,30 @@ export class SidecarClient {
     return this.request("/ingest", {
       session_id: sessionId,
       turns,
+      ...(scopeId && { scope_id: scopeId }),
+    })
+  }
+
+  async bufferTurn(
+    sessionId: string,
+    turn: { prompt_text: string; response_text: string },
+    scopeId?: string,
+  ): Promise<BufferTurnResponse> {
+    return this.request("/buffer_turn", {
+      session_id: sessionId,
+      turn,
+      ...(scopeId && { scope_id: scopeId }),
+    })
+  }
+
+  async flushSession(
+    sessionId: string,
+    scopeId?: string,
+    final: boolean = true,
+  ): Promise<FlushSessionResponse> {
+    return this.request("/flush_session", {
+      session_id: sessionId,
+      final,
       ...(scopeId && { scope_id: scopeId }),
     })
   }

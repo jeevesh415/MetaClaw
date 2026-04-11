@@ -37,7 +37,10 @@ _METACLAW_ROOT = Path(os.environ.get("METACLAW_ROOT") or _SCRIPT_DIR.parent.pare
 class cfg:
     LOG_FILE      = str(_METACLAW_ROOT / "benchmark" / "logs" / "skills_memory_run" / "bench_run.log")
     BENCH_BIN     = os.environ.get("METACLAW_BENCH_BIN", "metaclaw-bench")
-    BENCH_INPUT   = str(_METACLAW_ROOT / "benchmark" / "data" / "metaclaw-bench" / "all_tests_metaclaw.json")
+    BENCH_INPUT   = os.environ.get(
+        "METACLAW_BENCH_INPUT",
+        str(_METACLAW_ROOT / "benchmark" / "data" / "metaclaw-bench" / "all_tests_metaclaw.json"),
+    )
     BENCH_OUTPUT  = str(_METACLAW_ROOT / "benchmark" / "results")
     BENCH_COUNT   = 3    # -n  retries per failed question
     API_KEY_SCRIPT = os.environ.get("METACLAW_API_KEY_SCRIPT")

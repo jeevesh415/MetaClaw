@@ -46,6 +46,7 @@ source ~/.metaclaw_bench_env.sh
 | `METACLAW_BIN` | `metaclaw` (resolved via `PATH`) | Explicit path to the `metaclaw` binary (`proxy_run.py`) |
 | `METACLAW_API_KEY_SCRIPT` | unset (skip) | Shell script to `source` for exporting env vars; useful when credentials are managed externally |
 | `METACLAW_SKILLS_DIR` | `<METACLAW_ROOT>/memory_data/skills` | Directory containing pre-built skills (required for skills-based scripts) |
+| `METACLAW_BENCH_INPUT` | per-script default (see table below) | Override the benchmark input file for all scripts; useful for switching to a smaller dataset without editing individual scripts |
 
 ---
 
@@ -198,17 +199,22 @@ METACLAW_CONFIG_FILE=/path/to/config.yaml python benchmark/scripts/proxy_run.py
 
 ## Script Comparison
 
-| Script | Proxy | Skills | Memory | RL | Workers | Input file |
-|--------|-------|--------|--------|----|---------|------------|
+| Script | Proxy | Skills | Memory | RL | Workers | Default input file |
+|--------|-------|--------|--------|----|---------|-------------------|
 | `baseline_run.py` | — | — | — | — | parallel (`-w 15`) | `all_tests.json` |
 | `proxy_passthrough_run.py` | ✓ | — | — | — | parallel (`-w 15`) | `all_tests_metaclaw.json` |
 | `skills_only_run.py` | ✓ | ✓ | — | — | serial (`-w 1`) | `all_tests_metaclaw.json` |
 | `memory_run.py` | ✓ | — | ✓ | — | serial (`-w 1`) | `all_tests_metaclaw.json` |
+| `buffer_memory_run.py` | ✓ | — | ✓ (incremental) | — | serial (`-w 1`) | `all_tests_metaclaw.json` |
 | `rl_only_run.py` | ✓ | — | — | ✓ | serial (`-w 1`) | `all_tests_metaclaw.json` |
 | `rl_run.py` | ✓ | ✓ | — | ✓ | serial (`-w 1`) | `all_tests_metaclaw.json` |
 | `skills_memory_run.py` | ✓ | ✓ | ✓ | — | serial (`-w 1`) | `all_tests_metaclaw.json` |
 | `rl_only_memory_run.py` | ✓ | — | ✓ | ✓ | serial (`-w 1`) | `all_tests_metaclaw.json` |
 | `madmax_memory_run.py` | ✓ | ✓ | ✓ | ✓ | serial (`-w 1`) | `all_tests_metaclaw.json` |
+
+All default paths resolve under `<METACLAW_ROOT>/benchmark/data/metaclaw-bench/`.
+Set `METACLAW_BENCH_INPUT` to an absolute path to override for every script at once,
+e.g. to point at the smaller `metaclaw-bench-small` dataset.
 
 **Why the serial constraint?**  Any script that activates MetaClaw state (memory extracts, skill updates, RL checkpoints) relies on strict ordering: day N+1 must see the state accumulated through day N.  Running tests concurrently would corrupt the accumulated state.
 

@@ -183,33 +183,6 @@ metaclaw-bench report -r /tmp/infer_out -o /tmp/report_out
 
 ---
 
-### `report-ratio`
-
-Compute compaction ratios between a baseline report and one or more compaction reports.
-
-```
-metaclaw-bench report-ratio -b <base_report.json> -c <comp1.json> [<comp2.json> ...] [-o <output_dir>]
-```
-
-**Options**
-
-| Flag | Required | Description |
-|------|----------|-------------|
-| `-b`, `--base` | yes | Path to the baseline `report.json` |
-| `-c`, `--compactions` | yes | One or more paths to compaction `report.json` files or directories |
-| `-o`, `--output` | no | Output directory for `ratio_report.json`; prints to terminal if omitted |
-
-**Example**
-
-```bash
-metaclaw-bench report-ratio \
-  -b /tmp/baseline/report.json \
-  -c /tmp/compaction/report.json \
-  -o /tmp/ratio_out
-```
-
----
-
 ### `run`
 
 Full pipeline: infer → scoring → report.

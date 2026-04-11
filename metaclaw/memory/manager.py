@@ -39,6 +39,7 @@ class MemoryManager:
         embedding_mode: str = "hashing",
         embedding_model: str = "all-MiniLM-L6-v2",
         embedder: BaseEmbedder | None = None,
+        flush_every: int = 5,
     ):
         self.store = store
         self.policy = policy or MemoryPolicy()
@@ -74,6 +75,11 @@ class MemoryManager:
         self._retrieval_cache: dict[str, list[MemoryUnit]] = {}
         self._cache_max_size = 16
         self._event_callbacks: list[callable] = []
+        self.flush_every = max(1, flush_every)
+        self._session_buffers: dict[str, list[dict]] = {}
+        self._session_contexts: dict[str, _MultiTurnContext] = {}
+        self._session_turn_counts: dict[str, int] = {}
+        self._session_all_turns: dict[str, list[dict]] = {}
 
     @classmethod
     def from_config(cls, cfg: MetaClawConfig) -> "MemoryManager":
@@ -99,6 +105,7 @@ class MemoryManager:
             telemetry_store=telemetry_store,
             embedding_mode=getattr(cfg, "memory_embedding_mode", "hashing"),
             embedding_model=getattr(cfg, "memory_embedding_model", "all-MiniLM-L6-v2"),
+            flush_every=getattr(cfg, "memory_flush_every", 5),
         )
 
     @classmethod
@@ -122,6 +129,7 @@ class MemoryManager:
             telemetry_store=telemetry_store,
             embedding_mode=getattr(cfg, "memory_embedding_mode", "hashing"),
             embedding_model=getattr(cfg, "memory_embedding_model", "all-MiniLM-L6-v2"),
+            flush_every=getattr(cfg, "memory_flush_every", 5),
         )
 
     def register_event_callback(self, callback: callable) -> None:
@@ -149,52 +157,132 @@ class MemoryManager:
         turns: list[dict],
         scope_id: str | None = None,
     ) -> int:
-        """Create simple phase-1 memory units from a completed session."""
+        """Create phase-1 memory units from a completed session (one-shot)."""
         scope = scope_id or self.scope_id
-        units: list[MemoryUnit] = []
-
-        # Multi-turn context accumulator for cross-turn extraction.
         context = _MultiTurnContext()
+        units = self._extract_turns_to_units(scope, session_id, turns, context, turn_offset=0)
+        if turns:
+            units.append(self._build_working_summary_unit(
+                scope, session_id, turns, turn_start=1, turn_end=len(turns),
+            ))
+        return self._persist_units(scope, session_id, units)
 
+    def buffer_turn(
+        self,
+        session_id: str,
+        turn: dict,
+        scope_id: str | None = None,
+    ) -> int | None:
+        """Append a single turn to the session's buffer.
+
+        Auto-flushes (incremental, no working_summary) once the buffer reaches
+        `flush_every` turns. Returns the number of memories added if a flush
+        happened, else None.
+        """
+        scope = scope_id or self.scope_id
+        buf = self._session_buffers.setdefault(session_id, [])
+        buf.append(turn)
+        self._session_all_turns.setdefault(session_id, []).append(turn)
+        if len(buf) >= self.flush_every:
+            return self.flush_session(session_id, scope_id=scope, final=False)
+        return None
+
+    def flush_session(
+        self,
+        session_id: str,
+        scope_id: str | None = None,
+        final: bool = True,
+    ) -> int:
+        """Flush buffered turns for a session.
+
+        When `final=True`, also emits a working_summary covering all turns seen
+        so far and clears the session's buffered state. When `final=False`,
+        extraction runs against the current buffer only and working_summary is
+        skipped (incremental mid-session flush).
+        """
+        scope = scope_id or self.scope_id
+        buf = self._session_buffers.get(session_id, [])
+        context = self._session_contexts.setdefault(session_id, _MultiTurnContext())
+        prior = self._session_turn_counts.get(session_id, 0)
+        units = self._extract_turns_to_units(
+            scope, session_id, buf, context, turn_offset=prior,
+        )
+        total_turns = self._session_all_turns.get(session_id, [])
+        if final and total_turns:
+            units.append(self._build_working_summary_unit(
+                scope, session_id, total_turns,
+                turn_start=1, turn_end=len(total_turns),
+            ))
+        added = self._persist_units(scope, session_id, units)
+        self._session_turn_counts[session_id] = prior + len(buf)
+        self._session_buffers[session_id] = []
+        if final:
+            self._session_buffers.pop(session_id, None)
+            self._session_contexts.pop(session_id, None)
+            self._session_turn_counts.pop(session_id, None)
+            self._session_all_turns.pop(session_id, None)
+        return added
+
+    def _extract_turns_to_units(
+        self,
+        scope: str,
+        session_id: str,
+        turns: list[dict],
+        context: "_MultiTurnContext",
+        turn_offset: int = 0,
+    ) -> list[MemoryUnit]:
+        units: list[MemoryUnit] = []
         for idx, turn in enumerate(turns, start=1):
+            turn_index = turn_offset + idx
             prompt_text = str(turn.get("prompt_text", "") or "").strip()
             response_text = str(turn.get("response_text", "") or "").strip()
             if not prompt_text and not response_text:
                 continue
-
             extracted = _extract_memory_units_for_turn(
                 scope_id=scope,
                 session_id=session_id,
-                turn_index=idx,
+                turn_index=turn_index,
                 prompt_text=prompt_text,
                 response_text=response_text,
                 multi_turn_context=context,
             )
             if extracted:
                 logger.info(
-                    "[Memory] extract turn=%d/%d → %d units [%s]",
-                    idx, len(turns), len(extracted),
+                    "[Memory] extract turn=%d → %d units [%s]",
+                    turn_index, len(extracted),
                     ", ".join(u.memory_type.value for u in extracted),
                 )
             units.extend(extracted)
-            context.add_turn(prompt_text, response_text, idx)
+            context.add_turn(prompt_text, response_text, turn_index)
+        return units
 
-        if turns:
-            units.append(
-                MemoryUnit(
-                    memory_id=str(uuid.uuid4()),
-                    scope_id=scope,
-                    memory_type=MemoryType.WORKING_SUMMARY,
-                    content=_build_working_summary(turns),
-                    summary="Current working summary from the most recent completed session.",
-                    source_session_id=session_id,
-                    source_turn_start=1,
-                    source_turn_end=len(turns),
-                    importance=0.9,
-                    confidence=0.8,
-                )
-            )
+    def _build_working_summary_unit(
+        self,
+        scope: str,
+        session_id: str,
+        turns: list[dict],
+        turn_start: int,
+        turn_end: int,
+    ) -> MemoryUnit:
+        return MemoryUnit(
+            memory_id=str(uuid.uuid4()),
+            scope_id=scope,
+            memory_type=MemoryType.WORKING_SUMMARY,
+            content=_build_working_summary(turns),
+            summary="Current working summary from the most recent completed session.",
+            source_session_id=session_id,
+            source_turn_start=turn_start,
+            source_turn_end=turn_end,
+            importance=0.9,
+            confidence=0.8,
+        )
 
+    def _persist_units(
+        self,
+        scope: str,
+        session_id: str,
+        units: list[MemoryUnit],
+    ) -> int:
         # Pre-ingestion validation: skip units with empty or overly short content.
         pre_validate_count = len(units)
         units = [u for u in units if len(u.content.strip()) >= 3]
@@ -263,11 +351,10 @@ class MemoryManager:
             stats.get("active", 0),
             stats.get("dominant_type", ""),
         )
-        # Auto-save stats snapshot after ingestion for trend tracking.
         try:
             self.store.save_stats_snapshot(scope)
         except Exception:
-            pass  # Best-effort stats tracking.
+            pass
         self._notify("ingest", scope_id=scope, session_id=session_id, added=added)
         return added
 

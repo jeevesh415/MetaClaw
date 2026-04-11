@@ -947,6 +947,56 @@ class MetaClawAPIServer:
                 "sessions": results,
             })
 
+        @app.post("/v1/memory/buffer_turn")
+        async def memory_buffer_turn(
+            request: Request,
+            authorization: Optional[str] = Header(default=None),
+        ):
+            """Append one turn to a session's incremental buffer.
+
+            Request body: {"session_id": "...", "turn": {"prompt_text": "...", "response_text": "..."}, "scope_id": "..."}
+            Auto-flushes when the buffer reaches flush_every turns.
+            Returns {"flushed": bool, "added": int | null}.
+            """
+            owner: MetaClawAPIServer = request.app.state.owner
+            await owner._check_auth(authorization)
+            if not owner.memory_manager:
+                raise HTTPException(status_code=503, detail="memory not enabled")
+            body = await request.json()
+            session_id = str(body.get("session_id", "")).strip()
+            turn = body.get("turn", {})
+            raw_scope = str(body.get("scope_id", "")).strip()
+            scope = base_scope(raw_scope) if raw_scope else None
+            result = await asyncio.to_thread(
+                owner.memory_manager.buffer_turn, session_id, turn, scope,
+            )
+            return JSONResponse(content={"flushed": result is not None, "added": result})
+
+        @app.post("/v1/memory/flush_session")
+        async def memory_flush_session(
+            request: Request,
+            authorization: Optional[str] = Header(default=None),
+        ):
+            """Flush buffered turns for a session.
+
+            Request body: {"session_id": "...", "scope_id": "...", "final": true}
+            When final=true (default), emits a working_summary and clears session state.
+            Returns {"added": int}.
+            """
+            owner: MetaClawAPIServer = request.app.state.owner
+            await owner._check_auth(authorization)
+            if not owner.memory_manager:
+                raise HTTPException(status_code=503, detail="memory not enabled")
+            body = await request.json()
+            session_id = str(body.get("session_id", "")).strip()
+            raw_scope = str(body.get("scope_id", "")).strip()
+            scope = base_scope(raw_scope) if raw_scope else None
+            final = bool(body.get("final", True))
+            added = await asyncio.to_thread(
+                owner.memory_manager.flush_session, session_id, scope, final,
+            )
+            return JSONResponse(content={"added": added})
+
         return app
 
     async def _check_auth(self, authorization: Optional[str]):

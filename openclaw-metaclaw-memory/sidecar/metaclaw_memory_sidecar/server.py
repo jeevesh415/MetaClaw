@@ -52,6 +52,27 @@ class IngestResponse(BaseModel):
     added: int
 
 
+class BufferTurnRequest(BaseModel):
+    session_id: str
+    turn: TurnInput
+    scope_id: str | None = None
+
+
+class BufferTurnResponse(BaseModel):
+    flushed: bool
+    added: int | None = None
+
+
+class FlushSessionRequest(BaseModel):
+    session_id: str
+    scope_id: str | None = None
+    final: bool = True
+
+
+class FlushSessionResponse(BaseModel):
+    added: int
+
+
 class SearchRequest(BaseModel):
     query: str
     scope_id: str | None = None
@@ -188,6 +209,21 @@ def create_app(config: SidecarConfig) -> FastAPI:
         turns = [{"prompt_text": t.prompt_text, "response_text": t.response_text} for t in req.turns]
         added = mgr.ingest_session_turns(req.session_id, turns, scope_id=scope)
         return IngestResponse(added=added)
+
+    @app.post("/buffer_turn", response_model=BufferTurnResponse)
+    def buffer_turn(req: BufferTurnRequest):
+        mgr = _mgr()
+        scope = _scope(req.scope_id)
+        turn = {"prompt_text": req.turn.prompt_text, "response_text": req.turn.response_text}
+        result = mgr.buffer_turn(req.session_id, turn, scope_id=scope)
+        return BufferTurnResponse(flushed=result is not None, added=result)
+
+    @app.post("/flush_session", response_model=FlushSessionResponse)
+    def flush_session(req: FlushSessionRequest):
+        mgr = _mgr()
+        scope = _scope(req.scope_id)
+        added = mgr.flush_session(req.session_id, scope_id=scope, final=req.final)
+        return FlushSessionResponse(added=added)
 
     @app.post("/search", response_model=SearchResponse)
     def search(req: SearchRequest):

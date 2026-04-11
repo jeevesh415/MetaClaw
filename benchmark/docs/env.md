@@ -75,6 +75,23 @@ Useful when credentials are managed by a secrets manager or a separate auth help
 
 ---
 
+### Benchmark input file
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `METACLAW_BENCH_INPUT` | no | per-script default | Absolute path to the `all_tests*.json` file used as benchmark input.  Overrides the built-in default in every runner script simultaneously.  Useful for switching between the full dataset and a smaller subset (e.g. `metaclaw-bench-small`) without modifying any script. |
+
+**Default values by script:**
+
+- `baseline_run.py` — `<METACLAW_ROOT>/benchmark/data/metaclaw-bench/all_tests.json`
+- all other scripts — `<METACLAW_ROOT>/benchmark/data/metaclaw-bench/all_tests_metaclaw.json`
+
+**Where consumed:**
+
+- `cfg.BENCH_INPUT` in all `scripts/*.py` — resolved at import time via `os.environ.get("METACLAW_BENCH_INPUT", <default>)`.
+
+---
+
 ### Skills directory
 
 | Variable | Required | Default | Description |

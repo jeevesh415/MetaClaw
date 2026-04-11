@@ -849,6 +849,7 @@ async def _run_group(
     eval_name: str,
     workspace_path: Path,
     gateway_port: int | None = None,
+    buffer_turns_port: int | None = None,
 ) -> None:
     """Run all rounds within a group serially.
 
@@ -952,6 +953,16 @@ async def _run_group(
             passed = inline_score.get("passed", False)
             print(f"  [inline_score] {test_id}/{group_id}/{round_id}: passed={passed}")
 
+            # --- Buffer this turn for incremental memory ingestion ---
+            if buffer_turns_port is not None:
+                await asyncio.to_thread(
+                    _trigger_buffer_turn,
+                    original_session_id,
+                    query,
+                    result.get("answer", ""),
+                    buffer_turns_port,
+                )
+
             prev_inline_score = inline_score
             prev_round_record = round_record
 
@@ -996,6 +1007,7 @@ async def _run_one_test(
     retry: int,
     outer_semaphore: asyncio.Semaphore,
     query_reader: QueryReader,
+    buffer_turns_port: int | None = None,
 ) -> None:
     """Run all groups for one test scenario under its own work copy and gateway.
 
@@ -1069,6 +1081,7 @@ async def _run_one_test(
                     eval_name=eval_name,
                     workspace_path=workspace_copy,
                     gateway_port=gateway_port,
+                    buffer_turns_port=buffer_turns_port,
                 )
         finally:
             if gateway_proc.returncode is None:
@@ -1121,6 +1134,84 @@ def _trigger_memory_ingest(proxy_port: int = 30000) -> bool:
         return False
 
 
+def _trigger_buffer_turn(
+    session_id: str,
+    prompt_text: str,
+    response_text: str,
+    proxy_port: int = 30000,
+) -> bool:
+    """Call POST /buffer_turn on the sidecar to append one turn to the session buffer.
+
+    The sidecar auto-flushes when the buffer reaches ``flush_every`` turns.
+    Returns True on success; False on any error.
+    """
+    import urllib.request
+    import urllib.error
+
+    url = f"http://localhost:{proxy_port}/v1/memory/buffer_turn"
+    payload = json.dumps({
+        "session_id": session_id,
+        "turn": {
+            "prompt_text": prompt_text,
+            "response_text": response_text,
+        },
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=payload, method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read().decode())
+            if result.get("flushed"):
+                added = result.get("added")
+                print(f"  [buffer_turn] auto-flush → added={added} [session={session_id[:20]}]")
+            return True
+    except urllib.error.HTTPError as e:
+        print(f"  [buffer_turn] ERROR: HTTP {e.code} [session={session_id[:20]}]")
+        return False
+    except Exception as e:
+        print(f"  [buffer_turn] ERROR: {e} [session={session_id[:20]}]")
+        return False
+
+
+def _trigger_flush_session(
+    session_id: str,
+    proxy_port: int = 30000,
+    final: bool = True,
+) -> bool:
+    """Call POST /flush_session to ingest a session's buffered turns.
+
+    When ``final=True`` (default) the sidecar also emits a working_summary unit
+    and clears the session's internal buffer state.
+    """
+    import urllib.request
+    import urllib.error
+
+    url = f"http://localhost:{proxy_port}/v1/memory/flush_session"
+    payload = json.dumps({
+        "session_id": session_id,
+        "final": final,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=payload, method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            result = json.loads(resp.read().decode())
+            added = result.get("added", 0)
+            label = "final" if final else "incremental"
+            print(f"  [flush_session] {label} → added={added} [session={session_id[:20]}]")
+            return True
+    except urllib.error.HTTPError as e:
+        print(f"  [flush_session] ERROR: HTTP {e.code} [session={session_id[:20]}]")
+        return False
+    except Exception as e:
+        print(f"  [flush_session] ERROR: {e} [session={session_id[:20]}]")
+        return False
+
+
 def _trigger_train_step() -> bool:
     """Call ``metaclaw train-step`` as a subprocess and return True on success."""
     print("\n" + "=" * 60)
@@ -1162,6 +1253,7 @@ async def _run_one_all_tests(
     scene_per_train: int | None = None,
     memory: bool = False,
     memory_proxy_port: int = 30000,
+    buffer_turns: bool = False,
 ) -> None:
     """Process all test scenarios in one all_tests.json.
 
@@ -1207,9 +1299,9 @@ async def _run_one_all_tests(
 
     test_list = all_tests.get("test", [])
 
-    _need_serial = (scene_per_train is not None and scene_per_train > 0) or memory
+    _need_serial = (scene_per_train is not None and scene_per_train > 0) or memory or buffer_turns
     if _need_serial:
-        # Serial execution: needed for scene-per-train or memory ingest ordering.
+        # Serial execution: needed for scene-per-train, memory ingest, or buffer_turns ordering.
         if workers != 1 and (scene_per_train is not None and scene_per_train > 0):
             print(
                 f"[warn] --scene-per-train requires serial execution; "
@@ -1218,6 +1310,11 @@ async def _run_one_all_tests(
         if workers != 1 and memory:
             print(
                 f"[warn] --memory requires serial execution; "
+                f"overriding workers from {workers} to 1"
+            )
+        if workers != 1 and buffer_turns:
+            print(
+                f"[warn] --buffer-turns requires serial execution; "
                 f"overriding workers from {workers} to 1"
             )
         total_scenes = len(test_list)
@@ -1233,13 +1330,18 @@ async def _run_one_all_tests(
                 retry=retry,
                 outer_semaphore=outer_semaphore,
                 query_reader=query_reader,
+                buffer_turns_port=memory_proxy_port if buffer_turns else None,
             )
             # Skip memory ingest and RL training after the last scene
             # — no more scenes to benefit from the updated state.
             if i == total_scenes:
                 break
-            # Memory ingest after each test scene (except last)
-            if memory:
+            # Incremental path: flush this scene's session buffer (final=True adds working_summary)
+            if buffer_turns:
+                session_id = test["session"]
+                await asyncio.to_thread(_trigger_flush_session, session_id, memory_proxy_port, True)
+            # Batch path: ingest after each test scene (except last)
+            elif memory:
                 await asyncio.to_thread(_trigger_memory_ingest, memory_proxy_port)
             # RL training trigger (except last)
             if scene_per_train is not None and scene_per_train > 0 and i % scene_per_train == 0:
@@ -1280,6 +1382,7 @@ def run_infer(
     scene_per_train: int | None = None,
     memory: bool = False,
     memory_proxy_port: int = 30000,
+    buffer_turns: bool = False,
 ) -> None:
     """Run batch inference on all tests in all_tests.json (or directory).
 
@@ -1292,8 +1395,13 @@ def run_infer(
         retry: Number of retries per failed question (default: 0).
         query_reader: Custom QueryReader (uses QuestionsJsonQueryReader by default).
         scene_per_train: If set, trigger ``metaclaw train-step`` every N scenes.
-        memory: If True, trigger memory ingestion after each test scene.
-        memory_proxy_port: MetaClaw proxy port for memory ingest calls.
+        memory: If True, trigger batch memory ingestion after each test scene via
+                POST /v1/memory/ingest.
+        memory_proxy_port: MetaClaw proxy port for memory / buffer_turn calls.
+        buffer_turns: If True, use incremental ingestion: POST /buffer_turn after
+                      every round and POST /flush_session(final=True) after each
+                      scene.  Mutually exclusive with ``memory``; if both are set
+                      buffer_turns takes precedence.
     """
     if query_reader is None:
         query_reader = get_default_query_reader()
@@ -1313,7 +1421,12 @@ def run_infer(
 
     if scene_per_train is not None:
         print(f"\n[info] RL training enabled: train-step every {scene_per_train} scene(s)")
-    if memory:
+    if buffer_turns:
+        print(
+            f"\n[info] Incremental memory enabled: buffer_turn per round + "
+            f"flush_session after each scene (proxy port {memory_proxy_port})"
+        )
+    elif memory:
         print(f"\n[info] Memory ingestion enabled: ingest after each scene (proxy port {memory_proxy_port})")
 
     async def _main() -> None:
@@ -1338,6 +1451,7 @@ def run_infer(
                 scene_per_train=scene_per_train,
                 memory=memory,
                 memory_proxy_port=memory_proxy_port,
+                buffer_turns=buffer_turns,
             )
 
     asyncio.run(_main())

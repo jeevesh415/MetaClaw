@@ -24,6 +24,7 @@ class SidecarConfig:
     auto_upgrade_enabled: bool = False
     auto_upgrade_interval: int = 900
     auto_consolidate: bool = True
+    flush_every: int = 5
     python_path: str = "python3"
     log_level: str = "info"
 
@@ -50,6 +51,7 @@ class SidecarConfig:
             memory_max_injected_units=self.max_injected_units,
             memory_max_injected_tokens=self.max_injected_tokens,
             memory_auto_consolidate=self.auto_consolidate,
+            memory_flush_every=self.flush_every,
         )
 
     @classmethod

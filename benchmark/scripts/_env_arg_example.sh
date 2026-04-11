@@ -61,6 +61,13 @@ export PRM_MODEL=<your-prm-model>
 # Directory containing pre-built skills (required for skills-based scripts).
 # export METACLAW_SKILLS_DIR=~/workspace/metaclaw-data/skills
 
+# Override the benchmark input file used by all runner scripts.
+# Useful for switching between the full dataset and a smaller subset without
+# editing individual scripts.  Must be an absolute path to an all_tests*.json file.
+# Defaults to <METACLAW_ROOT>/benchmark/data/metaclaw-bench/all_tests_metaclaw.json
+# (baseline_run.py defaults to all_tests.json in the same directory).
+# export METACLAW_BENCH_INPUT=/path/to/benchmark/data/metaclaw-bench-small/all_tests_metaclaw.json
+
 # ---------------------------------------------------------------------------
 # Sanity check (optional — uncomment to print loaded values)
 # ---------------------------------------------------------------------------

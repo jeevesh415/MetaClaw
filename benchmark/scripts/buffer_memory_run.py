@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """
-memory_run.py - Run the benchmark with the MetaClaw proxy in memory-only mode.
+buffer_memory_run.py - Run the benchmark with incremental per-turn memory ingestion.
 
-The proxy extracts and injects memories across test days (no skills, no RL).
-After the benchmark finishes the script queries the proxy memory API and writes
-a memory_report.md / memory_report.json alongside the regular report.
+Uses the buffer_turn / flush_session API path introduced in the memory-check branch:
+  - After every round  : POST /buffer_turn  (sidecar auto-flushes every flush_every turns)
+  - After every scene  : POST /flush_session(final=True)  (emits working_summary + clears state)
+  - No skills, no RL.
+
+This is the comparison target for memory_run.py (batch ingest).  Run both to
+determine whether intra-scene incremental memory retrieval improves benchmark scores.
 
 Set BENCHMARK_BASE_URL, BENCHMARK_API_KEY, and BENCHMARK_MODEL before running.
 See scripts/_env_arg_example.sh for a template.
@@ -32,7 +36,7 @@ _METACLAW_ROOT = Path(os.environ.get("METACLAW_ROOT") or _SCRIPT_DIR.parent.pare
 
 # ===================== Configuration =====================
 class cfg:
-    LOG_FILE      = str(_METACLAW_ROOT / "benchmark" / "logs" / "memory_run" / "bench_run.log")
+    LOG_FILE      = str(_METACLAW_ROOT / "benchmark" / "logs" / "buffer_memory_run" / "bench_run.log")
     BENCH_BIN     = os.environ.get("METACLAW_BENCH_BIN", "metaclaw-bench")
     BENCH_INPUT   = os.environ.get(
         "METACLAW_BENCH_INPUT",
@@ -42,7 +46,7 @@ class cfg:
     BENCH_COUNT   = 3    # -n  retries per failed question
     API_KEY_SCRIPT = os.environ.get("METACLAW_API_KEY_SCRIPT")
     PROXY_SCRIPT  = str(_SCRIPT_DIR / "proxy_run.py")
-    PROXY_CONFIG  = str(_SCRIPT_DIR / "config" / "memory.yaml")
+    PROXY_CONFIG  = str(_SCRIPT_DIR / "config" / "buffer-memory.yaml")
     # Per-run memory snapshots are stored under MEMORY_STORE_BASE/<timestamp>/.
     MEMORY_STORE_BASE = str(_METACLAW_ROOT / "benchmark" / "memory_runs")
 # =========================================================
@@ -156,7 +160,7 @@ def write_proxy_config(env: dict, memory_dir: Path, port: int) -> str:
 
 def start_proxy(env: dict, config_path: str, port: int) -> subprocess.Popen:
     """Start PROXY_SCRIPT in the background and wait until /healthz returns 200."""
-    print(f"[proxy] Starting proxy in memory-only mode (port={port})...")
+    print(f"[proxy] Starting proxy in buffer-memory mode (port={port})...")
     proxy_env = dict(env) if env else dict(os.environ)
     proxy_env["METACLAW_CONFIG_FILE"] = config_path
     proc = subprocess.Popen(
@@ -321,10 +325,16 @@ def write_memory_report(mem_data: dict, output_dir: str, elapsed_seconds: float)
     feedback = mem_data.get("feedback_analysis", {})
 
     lines = [
-        "# Memory Benchmark Report",
+        "# Buffer-Memory Benchmark Report (Incremental Ingestion)",
         "",
         f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
         f"Benchmark duration: {elapsed_seconds:.1f}s ({elapsed_seconds / 60:.1f}min)",
+        "",
+        "## Ingestion Mode",
+        "",
+        "- **Path**: incremental (`buffer_turn` per round + `flush_session` per scene)",
+        "- **flush_every**: 3  (sidecar auto-flushes every 3 buffered turns)",
+        "- **Benefit**: memories from early rounds are available within the same scene",
         "",
         "## Overview",
         "",
@@ -409,7 +419,7 @@ def main():
             "-o", cfg.BENCH_OUTPUT,
             "-w", "1",
             "-n", str(cfg.BENCH_COUNT),
-            "--memory",
+            "--buffer-turns",
             "--memory-proxy-port", str(port),
         ]
         run_command(run_cmd, log_path, env=bench_env)

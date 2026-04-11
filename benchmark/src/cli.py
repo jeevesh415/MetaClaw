@@ -4,7 +4,6 @@ Commands:
   infer         Run batch inference on a test dataset
   scoring       Score infer results against correct answers
   report        Generate accuracy and token-usage report
-  report-ratio  Compute compaction ratios between base and compaction reports
   run           Run infer → scoring → report pipeline end-to-end
   check         Validate data integrity of benchmark dataset
   clean         Remove work/ isolation directories created by infer
@@ -44,6 +43,7 @@ def cmd_infer(args: argparse.Namespace) -> None:
         scene_per_train=args.scene_per_train,
         memory=args.memory,
         memory_proxy_port=args.memory_proxy_port,
+        buffer_turns=args.buffer_turns,
     )
 
 
@@ -75,20 +75,6 @@ def cmd_report(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
-# report-ratio
-# ---------------------------------------------------------------------------
-
-
-def cmd_report_ratio(args: argparse.Namespace) -> None:
-    from src.report.ratio_cmd import run_report_ratio
-    run_report_ratio(
-        base_path=args.base,
-        compaction_paths=args.compactions,
-        output_dir=args.output,
-    )
-
-
-# ---------------------------------------------------------------------------
 # run
 # ---------------------------------------------------------------------------
 
@@ -103,6 +89,7 @@ def cmd_run(args: argparse.Namespace) -> None:
         scene_per_train=args.scene_per_train,
         memory=args.memory,
         memory_proxy_port=args.memory_proxy_port,
+        buffer_turns=args.buffer_turns,
     )
 
 
@@ -175,13 +162,22 @@ def main() -> None:
         "--memory",
         action="store_true",
         default=False,
-        help="Trigger memory ingestion after each test scene via POST /v1/memory/ingest",
+        help="Trigger batch memory ingestion after each test scene via POST /v1/memory/ingest",
     )
     infer_parser.add_argument(
         "--memory-proxy-port",
         type=int,
         default=30000,
-        help="MetaClaw proxy port for memory ingest calls (default: 30000)",
+        help="MetaClaw proxy port for memory / buffer_turn calls (default: 30000)",
+    )
+    infer_parser.add_argument(
+        "--buffer-turns",
+        action="store_true",
+        default=False,
+        help=(
+            "Incremental memory ingestion: POST /buffer_turn after every round and "
+            "POST /flush_session after each scene.  Takes precedence over --memory."
+        ),
     )
 
     # ---- scoring ----
@@ -221,28 +217,6 @@ def main() -> None:
         help="Output directory for report.json and report.md (if not provided, only print to terminal)",
     )
 
-    # ---- report-ratio ----
-    ratio_parser = subparsers.add_parser(
-        "report-ratio",
-        help="Compute compaction ratios between base and compaction reports",
-    )
-    ratio_parser.add_argument(
-        "-b", "--base",
-        required=True,
-        help="Path to baseline report.json",
-    )
-    ratio_parser.add_argument(
-        "-c", "--compactions",
-        nargs="+",
-        required=True,
-        help="Paths to compaction report.json files or directories",
-    )
-    ratio_parser.add_argument(
-        "-o", "--output",
-        default=None,
-        help="Output directory for ratio_report.json (if not provided, only print to terminal)",
-    )
-
     # ---- run ----
     run_parser = subparsers.add_parser(
         "run",
@@ -280,13 +254,22 @@ def main() -> None:
         "--memory",
         action="store_true",
         default=False,
-        help="Trigger memory ingestion after each test scene via POST /v1/memory/ingest",
+        help="Trigger batch memory ingestion after each test scene via POST /v1/memory/ingest",
     )
     run_parser.add_argument(
         "--memory-proxy-port",
         type=int,
         default=30000,
-        help="MetaClaw proxy port for memory ingest calls (default: 30000)",
+        help="MetaClaw proxy port for memory / buffer_turn calls (default: 30000)",
+    )
+    run_parser.add_argument(
+        "--buffer-turns",
+        action="store_true",
+        default=False,
+        help=(
+            "Incremental memory ingestion: POST /buffer_turn after every round and "
+            "POST /flush_session after each scene.  Takes precedence over --memory."
+        ),
     )
 
     # ---- check ----
@@ -323,8 +306,6 @@ def main() -> None:
         cmd_scoring(args)
     elif args.command == "report":
         cmd_report(args)
-    elif args.command == "report-ratio":
-        cmd_report_ratio(args)
     elif args.command == "run":
         cmd_run(args)
     elif args.command == "check":

@@ -51,6 +51,7 @@ metaclaw start --mode skills_only  # skills uniquement, pas de RL (Tinker non re
 
 ## 🔥 Actualites
 
+- **[11/04/2026]** **v0.4.1** — Ingestion memoire incrementale : la couche memoire extrait et persiste desormais les tours tous les N tours (5 par defaut) au lieu d'attendre la fin de la session, reduisant le blackout memoire en cours de session. Ajoute les nouveaux endpoints sidecar `/buffer_turn` et `/flush_session`, un harnais de benchmark avec l'option `--buffer-turns` et des rapports de comparaison d'experiences.
 - **[25/03/2026]** **v0.4.0** — Contexture layer : MetaClaw persiste desormais la memoire inter-sessions pour les utilisateurs et les projets. Les faits pertinents, preferences et historiques de projet sont automatiquement recuperes et injectes dans les prompts. Inclut une politique de memoire adaptative, une consolidation en arriere-plan et un service sidecar memoire optionnel.
 - **[16/03/2026]** **v0.3.2** Support multi-Claw : IronClaw, PicoClaw, ZeroClaw, CoPaw, NanoClaw et NemoClaw sont desormais supportes aux cotes d'OpenClaw. NanoClaw via le nouvel endpoint compatible Anthropic `/v1/messages` ; NemoClaw via le routage d'inference OpenShell. OpenRouter ajoute comme plateforme LLM.
 - **[13/03/2026]** **v0.3.1** Support du backend MinT : l'entrainement RL fonctionne desormais avec Tinker et MinT. Configurable via `rl.backend` (auto/tinker/mint).

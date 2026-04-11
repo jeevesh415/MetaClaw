@@ -2,6 +2,11 @@ import type { SidecarClient } from "../client.js"
 import type { PluginConfig } from "../types.js"
 import { randomUUID } from "node:crypto"
 
+// Per-session state: how many turns have already been forwarded to the sidecar.
+// Lets agent_end fire per-turn with a full history snapshot while we only
+// enqueue the *new* turn(s) since the previous attempt.
+const sessionTurnCounts = new Map<string, number>()
+
 export function registerAutoCapture(
   api: any,
   getClient: () => SidecarClient,
@@ -11,25 +16,57 @@ export function registerAutoCapture(
 
   api.on(
     "agent_end",
-    async (event: Record<string, unknown>, _ctx: Record<string, unknown>) => {
+    async (event: Record<string, unknown>, ctx: Record<string, unknown>) => {
       try {
         if (!event.success) return
         const messages = event.messages as unknown[] | undefined
         if (!Array.isArray(messages) || messages.length === 0) return
 
-        const turns = extractTurns(messages)
-        if (turns.length === 0) return
+        const sessionId =
+          (ctx?.sessionId as string) ||
+          (event.sessionId as string) ||
+          randomUUID()
 
-        const sessionId = (event.sessionId as string) || randomUUID()
+        const allTurns = extractTurns(messages)
+        const alreadySent = sessionTurnCounts.get(sessionId) ?? 0
+        const newTurns = allTurns.slice(alreadySent)
+        if (newTurns.length === 0) return
+
         const client = getClient()
-        const result = await client.ingest(sessionId, turns, config.scope)
-        if (result.added > 0) {
+        for (const turn of newTurns) {
+          const res = await client.bufferTurn(sessionId, turn, config.scope)
+          if (res.flushed && res.added && res.added > 0) {
+            api.logger.info(
+              `metaclaw-memory: incremental flush added ${res.added} memories (session=${sessionId})`,
+            )
+          }
+        }
+        sessionTurnCounts.set(sessionId, allTurns.length)
+      } catch (err) {
+        api.logger.error("metaclaw-memory: auto-capture buffer_turn failed", err)
+      }
+    },
+  )
+
+  api.on(
+    "session_end",
+    async (event: Record<string, unknown>, ctx: Record<string, unknown>) => {
+      try {
+        const sessionId =
+          (event?.sessionId as string | undefined) ??
+          (ctx?.sessionId as string | undefined)
+        if (!sessionId) return
+        if (!sessionTurnCounts.has(sessionId)) return
+        const client = getClient()
+        const res = await client.flushSession(sessionId, config.scope, true)
+        if (res.added > 0) {
           api.logger.info(
-            `metaclaw-memory: captured ${result.added} memories from session ${sessionId}`,
+            `metaclaw-memory: final flush added ${res.added} memories (session=${sessionId})`,
           )
         }
+        sessionTurnCounts.delete(sessionId)
       } catch (err) {
-        api.logger.error("metaclaw-memory: auto-capture failed", err)
+        api.logger.error("metaclaw-memory: auto-capture flush_session failed", err)
       }
     },
   )

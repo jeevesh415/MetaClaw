@@ -81,6 +81,7 @@ class MetaClawConfig:
     memory_max_injected_tokens: int = 800
     memory_auto_extract: bool = True
     memory_auto_consolidate: bool = True
+    memory_flush_every: int = 5             # turns between incremental flushes when using buffer_turn
     memory_ignore_turn_type: bool = False   # buffer all turns (incl. side) for memory
     memory_manual_trigger: bool = False     # disable auto-ingest on session_done; use POST /v1/memory/ingest instead
 
