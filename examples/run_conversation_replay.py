@@ -184,9 +184,9 @@ async def main():
 
         # PRM reward
         use_prm=True,
-        prm_url="https://openai-api.shenmishajing.workers.dev/v1",
-        prm_model="gpt-5.2",
-        prm_api_key=os.environ.get("OPENAI_API_KEY", "aB7cD9eF2gH5iJ8kL1mN4oP6qR3sT0uV"),
+        prm_url=os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+        prm_model=os.environ.get("PRM_MODEL", ""),
+        prm_api_key=os.environ.get("OPENAI_API_KEY", ""),
         prm_m=3,
 
         # Skills

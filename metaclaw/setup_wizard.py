@@ -4,13 +4,11 @@ Interactive first-time setup wizard for MetaClaw.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
-from .claw_adapter import CLAW_TYPES
 from .config_store import CONFIG_DIR, ConfigStore
 
-_PROVIDER_PRESETS = {
+_API_KEY_PROVIDERS = {
     "kimi": {
         "api_base": "https://api.moonshot.cn/v1",
         "model_id": "moonshotai/Kimi-K2.5",
@@ -24,20 +22,45 @@ _PROVIDER_PRESETS = {
         "model_id": "gpt-4o",
     },
     "minimax": {
-        "api_base": "https://api.minimax.io/v1",
-        "model_id": "MiniMax-M2.7",
+        "api_base": "https://api.minimax.chat/v1",
+        "model_id": "",
+    },
+    "novita": {
+        "api_base": "https://api.novita.ai/v3/openai",
+        "model_id": "",
     },
     "openrouter": {
         "api_base": "https://openrouter.ai/api/v1",
-        "model_id": "google/gemini-2.5-pro",
+        "model_id": "",
     },
-    "bedrock": {
-        "api_base": "",
-        "model_id": "us.anthropic.claude-sonnet-4-6",
+    "volcengine": {
+        "api_base": "https://ark.cn-beijing.volces.com/api/v3",
+        "model_id": "doubao-seed-2-0-pro-260215",
     },
     "custom": {
         "api_base": "",
         "model_id": "",
+    },
+}
+
+_OAUTH_TOKEN_PROVIDERS = {
+    "anthropic": {
+        "model_id": "claude-sonnet-4-6",
+        "cli_binary": "claude",
+        "env_var": "CLAUDE_CODE_OAUTH_TOKEN",
+        "hint": "Claude Code CLI (npm install -g @anthropic-ai/claude-code)",
+    },
+    "openai-codex": {
+        "model_id": "codex-mini",
+        "cli_binary": "codex",
+        "env_var": "CODEX_OAUTH_TOKEN",
+        "hint": "OpenAI Codex CLI (npm install -g @openai/codex)",
+    },
+    "gemini": {
+        "model_id": "gemini-2.5-pro",
+        "cli_binary": "gemini",
+        "env_var": "GEMINI_OAUTH_TOKEN",
+        "hint": "Gemini CLI (npm install -g @anthropic-ai/gemini-cli)",
     },
 }
 
@@ -101,55 +124,107 @@ class SetupWizard:
         cs = ConfigStore()
         existing = cs.load() if cs.exists() else {}
 
-        # ---- CLI agent (claw type) ----
-        print("\n--- CLI Agent ---")
-        print(
-            "MetaClaw will auto-configure the chosen agent to route its LLM\n"
-            "calls through the MetaClaw proxy (skills + RL training)."
-        )
-        current_claw = existing.get("claw_type", "openclaw")
-        claw_type = _prompt_choice(
-            "CLI agent to configure",
-            CLAW_TYPES,
-            default=current_claw,
-        )
-
         # ---- Operating mode ----
-        current_mode = existing.get("mode", "madmax")
+        current_mode = existing.get("mode", "auto")
         mode = _prompt_choice(
             "Operating mode",
-            ["madmax", "skills_only", "rl"],
+            ["auto", "skills_only", "rl"],
             default=current_mode,
         )
 
-        # ---- LLM provider ----
+        # ---- LLM auth method ----
         print("\n--- LLM Configuration ---")
         current_llm = existing.get("llm", {})
-        current_provider = current_llm.get("provider", "custom")
-        provider = _prompt_choice(
-            "LLM provider",
-            ["kimi", "qwen", "openai", "minimax", "openrouter", "bedrock", "custom"],
-            default=current_provider,
+        current_auth_method = current_llm.get("auth_method", "api_key")
+
+        auth_method = _prompt_choice(
+            "Auth method",
+            ["oauth_token", "api_key"],
+            default=current_auth_method,
         )
-        preset = _PROVIDER_PRESETS[provider]
-        openrouter_config: dict = existing.get("openrouter", {})
-        if provider == "bedrock":
-            api_base = ""
-            api_key = ""
+
+        provider = ""
+        api_base = ""
+        api_key = ""
+        model_id = ""
+        oauth_token = ""
+
+        if auth_method == "oauth_token":
+            # ── OAuth token path: CLI subprocess ──────────────
+            print("\n  OAuth token providers use CLI tools (Claude Code, Codex, Gemini).")
+            print("  MetaClaw will forward requests via the CLI subprocess.\n")
+
+            current_provider = current_llm.get("provider", "anthropic")
+            if current_provider not in _OAUTH_TOKEN_PROVIDERS:
+                current_provider = "anthropic"
+
+            provider = _prompt_choice(
+                "Provider",
+                list(_OAUTH_TOKEN_PROVIDERS.keys()),
+                default=current_provider,
+            )
+            preset = _OAUTH_TOKEN_PROVIDERS[provider]
+            print(f"  CLI: {preset['hint']}")
+
             model_id = _prompt(
-                "Bedrock model ID (inference profile)",
+                "Model ID",
                 default=current_llm.get("model_id") or preset["model_id"],
             )
-            bedrock_region = _prompt(
-                "AWS region",
-                default=current_llm.get("bedrock_region", "us-east-1"),
-            )
+
+            # Check for existing stored token
+            from .auth_store import AuthStore
+            store = AuthStore()
+            profile = store.get_best_profile(provider)
+            if profile:
+                cred_preview = profile.credential[:12] + "..." + profile.credential[-4:]
+                print(f"\n  Existing token found: {profile.profile_id} ({cred_preview})")
+                update_token = _prompt_bool("Update token", default=False)
+            else:
+                print(f"\n  No {provider} token found.")
+                update_token = True
+
+            if update_token:
+                import getpass
+                env_var = preset["env_var"]
+                print(f"\n  Paste your {provider} OAuth token ({env_var} value).")
+                print("  Accepts full JSON or just the access token string.\n")
+                try:
+                    oauth_token = getpass.getpass("  Token: ")
+                except (EOFError, KeyboardInterrupt):
+                    print("\n  Skipped.")
+                    oauth_token = ""
+
+                if oauth_token.strip():
+                    try:
+                        profile = store.paste_oauth_token(provider, oauth_token)
+                        cred_preview = profile.credential[:12] + "..." + profile.credential[-4:]
+                        print(f"  Stored: {profile.profile_id} ({cred_preview})")
+                    except ValueError as e:
+                        print(f"  Error: {e}")
+                        print("  You can set it later: metaclaw config llm.oauth_token <token>")
+
         else:
-            bedrock_region = ""
-            api_base = _prompt(
-                "API base URL",
-                default=current_llm.get("api_base") or preset["api_base"],
+            # ── API key path: direct API call ─────────────────
+            current_provider = current_llm.get("provider", "custom")
+            if current_provider not in _API_KEY_PROVIDERS:
+                current_provider = "custom"
+
+            provider = _prompt_choice(
+                "Provider",
+                list(_API_KEY_PROVIDERS.keys()),
+                default=current_provider,
             )
+            preset = _API_KEY_PROVIDERS[provider]
+
+            if provider == "custom":
+                api_base = _prompt(
+                    "API base URL",
+                    default=current_llm.get("api_base") or preset["api_base"],
+                )
+            else:
+                api_base = preset["api_base"]
+                print(f"  API base: {api_base}")
+
             model_id = _prompt(
                 "Model ID",
                 default=current_llm.get("model_id") or preset["model_id"],
@@ -159,32 +234,6 @@ class SetupWizard:
                 default=current_llm.get("api_key", ""),
                 hide=True,
             )
-
-        # OpenRouter-specific options
-        if provider == "openrouter":
-            print("\n--- OpenRouter Options ---")
-            or_route = _prompt_choice(
-                "Routing strategy",
-                ["fallback", "price", "throughput", "latency"],
-                default=openrouter_config.get("route", "fallback"),
-            )
-            or_fallback = _prompt(
-                "Fallback models (comma-separated, optional)",
-                default=openrouter_config.get("fallback_models", ""),
-            )
-            or_data_policy = _prompt_choice(
-                "Data collection policy",
-                ["allow", "deny"],
-                default="deny" if openrouter_config.get("data_policy") == "deny" else "allow",
-            )
-            openrouter_config = {
-                "app_name": "MetaClaw",
-                "route": or_route,
-                "fallback_models": or_fallback,
-                "data_policy": "" if or_data_policy == "allow" else "deny",
-            }
-        else:
-            openrouter_config = {}
 
         # ---- Skills ----
         print("\n--- Skills Configuration ---")
@@ -209,35 +258,18 @@ class SetupWizard:
 
         # ---- RL config (only if mode uses RL) ----
         rl_config: dict = existing.get("rl", {})
-        rl_enabled = mode in ("rl", "madmax")
+        rl_enabled = mode in ("rl", "auto")
 
         if rl_enabled:
             print("\n--- RL Training Configuration ---")
-            backend = _prompt_choice(
-                "RL backend",
-                ["auto", "tinker", "mint"],
-                default=str(rl_config.get("backend", "auto") or "auto"),
-            )
             rl_model = _prompt(
                 "Base model for RL training",
                 default=rl_config.get("model") or model_id,
             )
-            backend_api_key = _prompt(
-                "RL backend API key",
-                default=(
-                    rl_config.get("api_key")
-                    or rl_config.get("tinker_api_key", "")
-                ),
+            tinker_api_key = _prompt(
+                "Tinker API key",
+                default=rl_config.get("tinker_api_key", ""),
                 hide=True,
-            )
-            backend_base_url = _prompt(
-                "RL backend base URL (optional)",
-                default=(
-                    rl_config.get("base_url")
-                    or rl_config.get("tinker_base_url")
-                    or os.environ.get("TINKER_BASE_URL", "")
-                    or os.environ.get("MINT_BASE_URL", "")
-                ),
             )
             prm_url = _prompt(
                 "PRM (reward model) URL",
@@ -283,21 +315,17 @@ class SetupWizard:
 
             rl_config = {
                 "enabled": True,
-                "backend": backend,
                 "model": rl_model,
-                "api_key": backend_api_key,
-                "base_url": backend_base_url,
-                "prm_provider": rl_config.get("prm_provider", "openai"),
+                "tinker_api_key": tinker_api_key,
                 "prm_url": prm_url,
                 "prm_model": prm_model,
                 "prm_api_key": prm_api_key,
-                "evolver_provider": rl_config.get("evolver_provider", "openai"),
-                "evolver_api_base": evolver_api_base,
-                "evolver_api_key": evolver_api_key,
-                "evolver_model": evolver_model,
                 "lora_rank": lora_rank,
                 "batch_size": rl_config.get("batch_size", 4),
                 "resume_from_ckpt": resume_from_ckpt,
+                "evolver_api_base": evolver_api_base,
+                "evolver_api_key": evolver_api_key,
+                "evolver_model": evolver_model,
             }
         else:
             rl_config = dict(rl_config)
@@ -385,21 +413,16 @@ class SetupWizard:
                 scheduler_config = {"enabled": False, "calendar": {"enabled": False}}
 
         # ---- Write config ----
-        proxy_config = dict(current_proxy)
-        proxy_config["port"] = proxy_port
-        proxy_config.setdefault("host", "0.0.0.0")
         data = {
-            "claw_type": claw_type,
             "mode": mode,
             "llm": {
                 "provider": provider,
+                "auth_method": auth_method,
                 "model_id": model_id,
                 "api_base": api_base,
                 "api_key": api_key,
-                "bedrock_region": bedrock_region,
             },
-            "openrouter": openrouter_config,
-            "proxy": proxy_config,
+            "proxy": {"port": proxy_port, "host": "0.0.0.0"},
             "skills": {
                 "enabled": skills_enabled,
                 "dir": skills_dir,
@@ -407,6 +430,7 @@ class SetupWizard:
                 "top_k": current_skills.get("top_k", 6),
                 "task_specific_top_k": current_skills.get("task_specific_top_k", 10),
                 "auto_evolve": auto_evolve,
+                "evolution_every_n_turns": current_skills.get("evolution_every_n_turns", 10),
             },
             "rl": rl_config,
             "scheduler": scheduler_config,

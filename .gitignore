@@ -1,5 +1,71 @@
+# ── Python ────────────────────────────────────────────────────────────────────
 *.pyc
+*.pyo
+*.pyd
 __pycache__/
+*.py[cod]
+
+# ── Build / packaging ─────────────────────────────────────────────────────────
+*.egg-info/
+*.egg
+dist/
+build/
+wheels/
+.eggs/
+
+# ── Virtual environments ──────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+.env/
+
+# ── Environment / secrets ─────────────────────────────────────────────────────
+.env
+.env.*
+*.key
+*.pem
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+
+# ── Type checkers / linters ───────────────────────────────────────────────────
+.mypy_cache/
+.ruff_cache/
+
+# ── IDE / editors ─────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Logs / temp ───────────────────────────────────────────────────────────────
+*.log
+*.tmp
+logs/
+
+# ── Node ──────────────────────────────────────────────────────────────────────
+node_modules/
+
+# ── Project-specific: metaclaw runtime data ───────────────────────────────────
 records/
 wandb/
+memory_runs/
 memory_data/skills
+memory_data/store/
+
+# ── Project-specific: benchmark runtime output ────────────────────────────────
+benchmark/data/*/work/
+benchmark/results/
+benchmark/data/*/openclaw_state/agents/*/agent/
+
+# ── Claude Code local settings ────────────────────────────────────────────────
+.claude/settings.local.json

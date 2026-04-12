@@ -5,11 +5,11 @@ Analyses failed ConversationSample objects and generates new skills in
 **Claude skill format** (name / description / content) via an LLM.
 
 Required environment variables (OpenAI-compatible):
-    OPENAI_API_KEY
+    OPENAI_API_KEY        — API key for the LLM provider
+    SKILL_EVOLVER_MODEL   — model name to use for skill evolution
 
 Optional:
-    OPENAI_BASE_URL       (default: https://openai-api.shenmishajing.workers.dev/v1)
-    SKILL_EVOLVER_MODEL   (default: gpt-5.2)
+    OPENAI_BASE_URL       — custom API base URL (defaults to https://api.openai.com/v1)
 
 Alternatively, pass a custom ``llm_client`` (any object that implements
 ``chat_complete(prompt: str) -> str``) to the constructor for testing.
@@ -82,22 +82,27 @@ class SkillEvolver:
             self._openai_client = None
         else:
             self._custom_client = None
-            api_key = os.environ.get("OPENAI_API_KEY", "aB7cD9eF2gH5iJ8kL1mN4oP6qR3sT0uV")
-            base_url = os.environ.get(
-                "OPENAI_BASE_URL",
-                "https://openai-api.shenmishajing.workers.dev/v1",
-            )
+            api_key = os.environ.get("OPENAI_API_KEY", "")
+            base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
             if not api_key:
                 raise EnvironmentError(
                     "SkillEvolver requires OPENAI_API_KEY environment variable, "
                     "or an explicit llm_client= argument."
                 )
+            if base_url != "https://api.openai.com/v1":
+                logger.info("[SkillEvolver] Using custom API base URL: %s", base_url)
             from openai import OpenAI
             self._openai_client = OpenAI(
                 api_key=api_key,
                 base_url=base_url,
             )
-            model_from_env = os.environ.get("SKILL_EVOLVER_MODEL", "gpt-5.2")
+            model_from_env = os.environ.get("SKILL_EVOLVER_MODEL", "")
+            if not model_from_env and (not azure_deployment or azure_deployment == "o3"):
+                raise EnvironmentError(
+                    "SkillEvolver requires SKILL_EVOLVER_MODEL environment variable "
+                    "(or set llm.model_id / rl.evolver_model in config.yaml), "
+                    "or an explicit llm_client= argument."
+                )
             self._openai_model = azure_deployment if azure_deployment and azure_deployment != "o3" else model_from_env
 
     # ------------------------------------------------------------------ #

@@ -25,7 +25,7 @@
 
 <br/>
 
-[Panoramica](#-panoramica) • [Avvio Rapido](#-avvio-rapido) • [Configurazione](#️-configurazione) • [Modalita Skills](#-modalita-skills) • [Modalita RL](#-modalita-rl) • [Modalita MadMax](#-modalita-madmax-predefinita) • [Citazione](#-citazione)
+[Panoramica](#-panoramica) • [Avvio Rapido](#-avvio-rapido) • [Configurazione](#️-configurazione) • [Modalita Skills](#-modalita-skills) • [Modalita RL](#-modalita-rl) • [Modalita Auto](#-modalita-auto-predefinita) • [Citazione](#-citazione)
 
 </div>
 
@@ -38,9 +38,7 @@
 
 ```bash
 metaclaw setup              # configurazione guidata iniziale
-metaclaw start              # predefinito: modalita madmax, Skill + addestramento RL programmato
-metaclaw start --daemon     # esegui in background, log -> ~/.metaclaw/metaclaw.log
-metaclaw start --daemon --log-file /tmp/metaclaw.log  # percorso log personalizzato
+metaclaw start              # predefinito: modalita auto, Skill + addestramento RL programmato
 metaclaw start --mode rl    # RL senza scheduler (addestra immediatamente a batch completo)
 metaclaw start --mode skills_only  # solo Skill, nessun RL (Tinker non necessario)
 ```
@@ -53,6 +51,8 @@ metaclaw start --mode skills_only  # solo Skill, nessun RL (Tinker non necessari
 
 ## 🔥 Novita
 
+- **[11/04/2026]** **v0.4.1** — Ingestione memoria incrementale: il livello di memoria ora estrae e persiste i turni ogni N turni (default 5) invece di attendere la fine della sessione, riducendo il blackout di memoria a metà sessione. Aggiunge i nuovi endpoint sidecar `/buffer_turn` e `/flush_session`, un harness di benchmark con il flag `--buffer-turns` e report di confronto esperimenti.
+- **[25/03/2026]** **v0.4.0** — Contexture layer: MetaClaw ora persiste la memoria tra le sessioni per utenti e progetti. Fatti rilevanti, preferenze e cronologia del progetto vengono recuperati automaticamente e iniettati nei prompt. Include una politica di memoria adattiva, consolidamento in background e un servizio sidecar per la memoria opzionale.
 - **[16/03/2026]** **v0.3.2** Supporto multi-Claw: IronClaw, PicoClaw, ZeroClaw, CoPaw, NanoClaw e NemoClaw ora supportati insieme a OpenClaw. NanoClaw tramite il nuovo endpoint compatibile Anthropic `/v1/messages`; NemoClaw tramite routing di inferenza OpenShell. OpenRouter aggiunto come piattaforma LLM.
 - **[13/03/2026]** **v0.3.1** Supporto backend MinT: l'addestramento RL ora funziona sia con Tinker che con MinT. Configurabile tramite `rl.backend` (auto/tinker/mint).
 - **[13/03/2026]** **v0.3** Supporto al meta-apprendimento continuo: gli aggiornamenti RL lenti vengono eseguiti solo durante le ore di sonno, i periodi di inattivita o le riunioni di Google Calendar. Aggiunta la separazione tra set support/query per evitare che segnali di ricompensa obsoleti inquinino gli aggiornamenti del modello.
@@ -74,7 +74,7 @@ Parla con il tuo agente come faresti normalmente. MetaClaw trasforma ogni conver
 
 Sotto il cofano, posiziona il tuo modello dietro un proxy compatibile con OpenAI (con un endpoint compatibile Anthropic `/v1/messages` per agenti come NanoClaw) che intercetta le interazioni da OpenClaw, NanoClaw, NemoClaw e altri agenti supportati, inietta le Skill pertinenti ad ogni turno e meta-apprende dall'esperienza accumulata. Le Skill vengono riassunte automaticamente dopo ogni sessione; con l'RL attivato, uno scheduler di meta-apprendimento posticipa gli aggiornamenti dei pesi alle finestre di inattivita, in modo che l'agente non venga mai interrotto durante l'uso attivo.
 
-Nessun cluster GPU necessario. MetaClaw funziona con qualsiasi API LLM compatibile con OpenAI, e utilizza un backend compatibile con Tinker per l'addestramento LoRA nel cloud. [Tinker](https://www.thinkingmachines.ai/tinker/) e il percorso di riferimento predefinito, e MinT puo essere abilitato tramite un pacchetto di compatibilita separato quando necessario.
+Nessun cluster GPU necessario. MetaClaw funziona con qualsiasi API LLM compatibile con OpenAI, e utilizza un backend compatibile con Tinker per l'addestramento LoRA nel cloud. [Tinker](https://www.thinkingmachines.ai/tinker/) e il percorso di riferimento predefinito, e MinT o Weaver possono essere abilitati tramite pacchetti di compatibilita separati quando necessario.
 
 ## 🤖 Funzionalita Principali
 
@@ -87,7 +87,10 @@ Configura una sola volta con `metaclaw setup`, poi `metaclaw start` avvia il pro
 |----------|-------------|-------------|
 | `skills_only` | | Proxy verso la tua API LLM. Skill iniettate e riassunte automaticamente dopo ogni sessione. Nessuna GPU / Tinker necessaria. |
 | `rl` | | Skill + addestramento RL (GRPO). Addestra immediatamente quando il batch e pieno. OPD opzionale per la distillazione teacher. |
-| `madmax` | ✅ | Skill + RL + scheduler intelligente. Gli aggiornamenti dei pesi RL vengono eseguiti solo durante le finestre di sonno/inattivita/riunioni. |
+| `auto` | ✅ | Skill + RL + scheduler intelligente. Gli aggiornamenti dei pesi RL vengono eseguiti solo durante le finestre di sonno/inattivita/riunioni. |
+
+### **Memoria a lungo termine**
+MetaClaw può conservare fatti, preferenze e cronologia del progetto tra le sessioni e iniettare contesto pertinente a ogni turno — così il tuo agente ricorda ciò che gli hai detto, anche settimane dopo.
 
 ### **Completamente asincrono per design**
 Serving, reward modeling e addestramento sono completamente disaccoppiati. L'agente continua a rispondere mentre lo scoring e l'ottimizzazione vengono eseguiti in parallelo.
@@ -98,6 +101,16 @@ Serving, reward modeling e addestramento sono completamente disaccoppiati. L'age
 
 ### 1. Installazione
 
+**OpenClaw (installazione con un clic):** usa la release [v0.4.0](https://github.com/aiming-lab/MetaClaw/releases/tag/v0.4.0) — esegui i comandi qui sotto, poi `metaclaw setup` e `metaclaw start`. Maggiori dettagli (Windows, mirror, configurazione, risoluzione dei problemi): [`extensions/metaclaw-openclaw/README.md`](../extensions/metaclaw-openclaw/README.md).
+
+```bash
+curl -LO https://github.com/aiming-lab/MetaClaw/releases/download/v0.4.0/metaclaw-plugin.zip
+unzip metaclaw-plugin.zip -d ~/.openclaw/extensions
+openclaw plugins enable metaclaw-openclaw && openclaw gateway restart
+```
+
+**pip** (PyPI or this repo):
+
 ```bash
 pip install -e .                        # modalita skills_only (leggera)
 pip install -e ".[rl]"                  # + supporto addestramento RL (torch, transformers, tinker)
@@ -105,8 +118,26 @@ pip install -e ".[evolve]"              # + evoluzione Skill tramite LLM compati
 pip install -e ".[scheduler]"           # + integrazione Google Calendar per lo scheduler
 pip install -e ".[rl,evolve,scheduler]" # consigliato per la configurazione completa RL + scheduler
 ```
+(Opzionale) L'integrazione WeChat utilizza il plugin ufficiale @tencent-weixin/openclaw-weixin. MetaClaw lo installa automaticamente quando WeChat è abilitato:
 
-Se vuoi usare `rl.backend=mint`, installa separatamente il pacchetto di compatibilita MinT nello stesso ambiente, ad esempio [`mindlab-toolkit`](https://github.com/MindLab-Research/mindlab-toolkit). MetaClaw mantiene questa dipendenza fuori dal pacchetto predefinito, cosi gli utenti RL possono scegliere esplicitamente tra Tinker e MinT.
+```bash
+metaclaw config wechat.enabled true
+metaclaw start
+```
+
+Il plugin viene installato automaticamente all'avvio di MetaClaw. Puoi anche installarlo manualmente:
+
+```bash
+npx -y @tencent-weixin/openclaw-weixin-cli@latest install
+```
+
+Per cambiare account WeChat (accedere di nuovo con un nuovo codice QR):
+
+```bash
+metaclaw start --wechat-relogin
+```
+
+Se vuoi usare `rl.backend=mint`, installa separatamente il pacchetto di compatibilita MinT nello stesso ambiente, ad esempio [`mindlab-toolkit`](https://github.com/MindLab-Research/mindlab-toolkit). Per `rl.backend=weaver`, installa separatamente [`nex-weaver`](https://github.com/nex-agi/weaver). MetaClaw mantiene queste dipendenze fuori dal pacchetto predefinito, cosi gli utenti RL possono scegliere esplicitamente tra Tinker, MinT e Weaver.
 
 ### 2. Configurazione
 
@@ -114,11 +145,14 @@ Se vuoi usare `rl.backend=mint`, installa separatamente il pacchetto di compatib
 metaclaw setup
 ```
 
-La procedura guidata interattiva ti chiedera di scegliere il tuo provider LLM (Kimi, Qwen, MiniMax o personalizzato), inserire la tua API key e, opzionalmente, abilitare l'addestramento RL.
+La procedura guidata interattiva ti chiederà di:
+1. **Scegliere il tuo agente personale** — `openclaw`, `copaw`, `ironclaw`, `picoclaw`, `zeroclaw`, `nanoclaw`, `nemoclaw` o `none` (MetaClaw lo configura all'avvio)
+2. **Scegliere il provider LLM** — Kimi, Qwen, OpenAI, Volcano Engine o personalizzato
+3. **Inserire la tua API key** e facoltativamente abilitare l'addestramento RL
 
-Il percorso RL di MetaClaw puo commutare esplicitamente tra `tinker` e `mint`. `auto` e il valore predefinito consigliato e inferira comunque MinT da credenziali o base URL in stile Mint quando il pacchetto MinT e installato.
+Il percorso RL di MetaClaw puo commutare esplicitamente tra `tinker`, `mint` e `weaver`. `auto` e il valore predefinito consigliato e inferira comunque MinT o Weaver da credenziali o base URL corrispondenti quando i pacchetti sono installati.
 
-**Tinker** (predefinito):
+**Tinker**:
 
 ```bash
 metaclaw config rl.backend tinker
@@ -135,6 +169,15 @@ metaclaw config rl.base_url https://mint.macaron.xin/
 metaclaw config rl.model Qwen/Qwen3-4B-Instruct-2507
 ```
 
+**Weaver**:
+
+```bash
+metaclaw config rl.backend weaver
+metaclaw config rl.api_key sk-...
+metaclaw config rl.base_url https://weaver-console.nex-agi.cn
+metaclaw config rl.model Qwen/Qwen3-8B
+```
+
 Gli alias legacy `rl.tinker_api_key` e `rl.tinker_base_url` sono ancora accettati per compatibilita con le versioni precedenti.
 
 ### 3. Avvio
@@ -143,7 +186,7 @@ Gli alias legacy `rl.tinker_api_key` e `rl.tinker_base_url` sono ancora accettat
 metaclaw start
 ```
 
-Tutto qui. MetaClaw avvia il proxy, configura automaticamente OpenClaw e riavvia il gateway. Apri OpenClaw e inizia a chattare: le Skill vengono iniettate ad ogni turno, e la sessione viene automaticamente riassunta in nuove Skill al termine.
+Fatto. MetaClaw avvia il proxy, configura automaticamente l'agente personale scelto e riavvia il gateway. Apri l'agente e inizia a chattare — le skill vengono iniettate a ogni turno e la sessione viene riassunta automaticamente in nuove skill al termine.
 
 ---
 
@@ -155,30 +198,38 @@ La configurazione si trova in `~/.metaclaw/config.yaml`, creata da `metaclaw set
 
 ```
 metaclaw setup                  # Procedura guidata di configurazione iniziale
-metaclaw start                  # Avvia MetaClaw (predefinito: modalita madmax)
-metaclaw start --daemon         # Avvia MetaClaw in background
-metaclaw start --daemon --log-file /tmp/metaclaw.log  # Percorso log personalizzato
+metaclaw start                  # Avvia MetaClaw (predefinito: modalita auto)
 metaclaw start --mode rl        # Forza la modalita RL (senza scheduler) per questa sessione
 metaclaw start --mode skills_only  # Forza la modalita solo Skill per questa sessione
 metaclaw stop                   # Ferma un'istanza MetaClaw in esecuzione
 metaclaw status                 # Controlla lo stato del proxy, la modalita e lo scheduler
 metaclaw config show            # Visualizza la configurazione corrente
 metaclaw config KEY VALUE       # Imposta un valore di configurazione
+metaclaw config llm.oauth_token TOKEN               # Memorizza token OAuth per il provider CLI corrente
+metaclaw auth paste-token --provider anthropic      # Memorizza token OAuth (anthropic | openai-codex | gemini)
+metaclaw auth status                                # Mostra tutti i profili di autenticazione memorizzati
+metaclaw uninstall              # Rimuovi tutti i dati MetaClaw, estensione OpenClaw e pacchetto pip
 ```
 
-Quando avvii MetaClaw con `--daemon`, il comando attende che il proxy locale sia operativo prima di restituire il controllo. Usa `metaclaw status` per verificare lo stato e `metaclaw stop` per arrestare il processo in background.
+Usa `metaclaw status` per verificare la disponibilita e `metaclaw stop` per arrestare il processo.
 
 <details>
 <summary><b>Riferimento completo della configurazione (clicca per espandere)</b></summary>
 
 ```yaml
-mode: madmax               # "madmax" | "rl" | "skills_only"
+mode: auto                 # "auto" | "rl" | "skills_only"
+claw_type: openclaw        # "openclaw" | "copaw" | "ironclaw" | "picoclaw" | "zeroclaw" | "nanoclaw" | "nemoclaw" | "hermes" | "none"
 
 llm:
-  provider: kimi            # kimi | qwen | openai | minimax | custom
+  auth_method: api_key      # "api_key" | "oauth_token"
+  provider: kimi            # kimi | qwen | openai | minimax | novita | openrouter | volcengine | custom
   model_id: moonshotai/Kimi-K2.5
   api_base: https://api.moonshot.cn/v1
   api_key: sk-...
+  # esempio oauth_token (token memorizzato con `metaclaw auth paste-token`):
+  # auth_method: oauth_token
+  # provider: anthropic     # anthropic | openai-codex | gemini
+  # model_id: claude-sonnet-4-6
 
 proxy:
   port: 30000
@@ -194,10 +245,10 @@ skills:
 
 rl:
   enabled: false            # impostare su true per abilitare l'addestramento RL
-  backend: auto             # "auto" | "tinker" | "mint"
+  backend: auto             # "auto" | "tinker" | "mint" | "weaver"
   model: moonshotai/Kimi-K2.5
   api_key: ""
-  base_url: ""              # endpoint backend opzionale, es. https://mint.macaron.xin/ per MinT
+  base_url: ""              # endpoint backend opzionale, es. https://mint.macaron.xin/ per MinT o https://weaver-console.nex-agi.cn per Weaver
   tinker_api_key: ""        # alias legacy per api_key
   tinker_base_url: ""       # alias legacy per base_url
   prm_url: https://api.openai.com/v1
@@ -217,10 +268,13 @@ opd:
   teacher_api_key: ""       # API key del modello teacher
   kl_penalty_coef: 1.0      # coefficiente di penalita KL per OPD
 
-max_context_tokens: 20000   # limite di token del prompt prima del troncamento
+max_context_tokens: 20000   # limite token del prompt prima del troncamento; 0 = nessun troncamento
+                            # (consigliato in skills_only con modelli cloud a grande contesto)
+context_window: 0           # finestra di contesto comunicata all'agente (es. soglia di compattazione OpenClaw);
+                            # 0 = auto (≈200 000 in skills_only, 32 768 in rl/auto)
 
-scheduler:                  # v0.3: scheduler di meta-apprendimento (abilitato automaticamente in modalita madmax)
-  enabled: false            # la modalita madmax lo abilita automaticamente; impostare manualmente per la modalita rl
+scheduler:                  # v0.3: scheduler di meta-apprendimento (abilitato automaticamente in modalita auto)
+  enabled: false            # la modalita auto lo abilita automaticamente; impostare manualmente per la modalita rl
   sleep_start: "23:00"
   sleep_end: "07:00"
   idle_threshold_minutes: 30
@@ -241,6 +295,8 @@ scheduler:                  # v0.3: scheduler di meta-apprendimento (abilitato a
 
 La modalita piu leggera. Nessuna GPU, nessun backend RL necessario. MetaClaw posiziona il tuo LLM dietro un proxy che inietta le Skill pertinenti ad ogni turno, poi riassume automaticamente nuove Skill dopo ogni conversazione.
 
+Per provider personalizzati compatibili con OpenAI, imposta `llm.api_base` sull'URL base completa della chat (di solito con `/v1`, ad es. `https://your-gateway.example/v1`). In modalità `skills_only`, MetaClaw riusa lo stesso endpoint per la compressione del prompt e le chiamate LLM ausiliarie, salvo che configuri un endpoint evolver separato.
+
 Le Skill sono brevi istruzioni Markdown conservate in `~/.metaclaw/skills/` come singoli file `SKILL.md`. La libreria cresce automaticamente con l'utilizzo.
 
 Per precaricare la banca di Skill integrata (oltre 40 Skill per coding, sicurezza, task agentici e altro):
@@ -255,9 +311,9 @@ cp -r memory_data/skills/* ~/.metaclaw/skills/
 
 **`metaclaw start --mode rl`**
 
-Tutto cio che offre la Modalita Skills, piu il fine-tuning RL continuo dalle conversazioni in tempo reale. Ogni turno di conversazione viene tokenizzato e inviato come campione di addestramento. Un LLM giudice (PRM) valuta le risposte in modo asincrono, e un backend compatibile con Tinker (Tinker cloud o MinT) esegue il fine-tuning LoRA con sostituzione a caldo dei pesi.
+Tutto cio che offre la Modalita Skills, piu il fine-tuning RL continuo dalle conversazioni in tempo reale. Ogni turno di conversazione viene tokenizzato e inviato come campione di addestramento. Un LLM giudice (PRM) valuta le risposte in modo asincrono, e un backend compatibile con Tinker (Tinker cloud, MinT o Weaver) esegue il fine-tuning LoRA con sostituzione a caldo dei pesi.
 
-**Tinker** (predefinito):
+**Tinker**:
 
 ```bash
 metaclaw config rl.backend tinker
@@ -275,6 +331,18 @@ metaclaw config rl.backend mint
 metaclaw config rl.api_key sk-mint-...
 metaclaw config rl.base_url https://mint.macaron.xin/
 metaclaw config rl.model Qwen/Qwen3-4B-Instruct-2507
+metaclaw config rl.prm_url https://api.openai.com/v1
+metaclaw config rl.prm_api_key sk-...
+metaclaw start --mode rl
+```
+
+**Weaver**:
+
+```bash
+metaclaw config rl.backend weaver
+metaclaw config rl.api_key sk-...
+metaclaw config rl.base_url https://weaver-console.nex-agi.cn
+metaclaw config rl.model Qwen/Qwen3-8B
 metaclaw config rl.prm_url https://api.openai.com/v1
 metaclaw config rl.prm_api_key sk-...
 metaclaw start --mode rl
@@ -303,13 +371,13 @@ Il teacher deve essere servito dietro un endpoint `/v1/completions` compatibile 
 
 ---
 
-## 🧠 Modalita MadMax (Predefinita)
+## 🧠 Modalita Auto (Predefinita)
 
 **`metaclaw start`**
 
 Tutto cio che offre la Modalita RL, piu uno scheduler di meta-apprendimento che posticipa gli aggiornamenti dei pesi alle finestre di inattivita dell'utente, in modo che l'agente non venga mai interrotto durante l'uso attivo. Questa e la modalita predefinita.
 
-Il passaggio di sostituzione a caldo dei pesi RL mette in pausa l'agente per diversi minuti. Invece di addestrare immediatamente quando il batch e pieno (come nella Modalita RL), MadMax attende una finestra appropriata.
+Il passaggio di sostituzione a caldo dei pesi RL mette in pausa l'agente per diversi minuti. Invece di addestrare immediatamente quando il batch e pieno (come nella Modalita RL), la modalita auto attende una finestra appropriata.
 
 Tre condizioni attivano una finestra di aggiornamento (una qualsiasi e sufficiente):
 
@@ -331,6 +399,22 @@ metaclaw config scheduler.calendar.credentials_path ~/.metaclaw/client_secrets.j
 Se l'utente ritorna durante un aggiornamento, il batch parziale viene salvato e ripreso alla finestra successiva.
 
 Ogni `ConversationSample` e contrassegnato con una versione `skill_generation`. Quando l'evoluzione delle Skill incrementa la generazione, il buffer RL viene svuotato in modo che solo i campioni post-evoluzione vengano utilizzati per gli aggiornamenti del gradiente (separazione set support/query MAML).
+
+---
+
+## 🗑️ Disinstallazione
+
+```bash
+metaclaw uninstall
+```
+
+Rimuove tutto in un solo passaggio: ferma l'istanza in esecuzione, pulisce i riferimenti MetaClaw in `~/.openclaw/openclaw.json`, elimina `~/.openclaw/extensions/metaclaw-openclaw/`, elimina `~/.metaclaw/`, disinstalla il pacchetto pip e riavvia il gateway OpenClaw. Viene richiesta conferma prima di qualsiasi eliminazione.
+
+Dopo la disinstallazione, rimuovi manualmente il repository se lo hai clonato:
+
+```bash
+rm -rf /path/to/MetaClaw
+```
 
 ---
 
@@ -356,6 +440,7 @@ MetaClaw si basa sui seguenti progetti open-source:
 - [SkillRL](https://github.com/aiming-lab/SkillRL) - il nostro framework RL potenziato con Skill.
 - [Tinker](https://www.thinkingmachines.ai/tinker/) - utilizzato per l'addestramento RL online.
 - [MinT](https://github.com/MindLab-Research/mindlab-toolkit) - backend alternativo per l'addestramento RL online.
+- [Weaver](https://github.com/nex-agi/weaver) - backend alternativo per l'addestramento RL online.
 - [OpenClaw-RL](https://github.com/Gen-Verse/OpenClaw-RL) - ispirazione per il nostro design RL.
 - [awesome-openclaw-skills](https://github.com/VoltAgent/awesome-openclaw-skills) - fornisce le basi per la nostra banca di Skill.
 - [NanoClaw](https://github.com/qwibitai/nanoclaw) - agente Claude personale di qwibitai, connesso tramite l'endpoint compatibile Anthropic `/v1/messages`.

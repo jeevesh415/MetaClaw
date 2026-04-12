@@ -25,7 +25,7 @@
 
 <br/>
 
-[概述](#-概述) • [快速开始](#-快速开始) • [配置说明](#️-配置说明) • [Skills 模式](#-skills-模式) • [RL 模式](#-rl-模式) • [MadMax 模式](#-madmax-模式默认) • [引用](#-引用)
+[概述](#-概述) • [快速开始](#-快速开始) • [配置说明](#️-配置说明) • [Skills 模式](#-skills-模式) • [RL 模式](#-rl-模式) • [Auto 模式](#-auto-模式默认) • [引用](#-引用)
 
 </div>
 
@@ -38,9 +38,7 @@
 
 ```bash
 metaclaw setup              # 首次配置向导
-metaclaw start              # 默认 madmax 模式：Skills + 定时 RL 训练
-metaclaw start --daemon     # 后台运行，日志 -> ~/.metaclaw/metaclaw.log
-metaclaw start --daemon --log-file /tmp/metaclaw.log  # 自定义日志路径
+metaclaw start              # 默认 auto 模式：Skills + 定时 RL 训练
 metaclaw start --mode rl    # 无调度器 RL（batch 满即训练）
 metaclaw start --mode skills_only  # 仅 Skills，无 RL（无需 Tinker）
 ```
@@ -53,6 +51,8 @@ metaclaw start --mode skills_only  # 仅 Skills，无 RL（无需 Tinker）
 
 ## 🔥 最新动态
 
+- **[2026/04/11]** **v0.4.1** — 增量记忆摄取：记忆层现在每 N 轮（默认 5）抽取并持久化一次对话，而非只在会话结束时处理，缩小了会话中途的记忆空白期。新增 `/buffer_turn` 与 `/flush_session` sidecar 端点、带 `--buffer-turns` 参数的 benchmark 工具，以及实验对比报告。
+- **[2026/03/25]** **v0.4.0** — Contexture layer（上下文层）：MetaClaw 现可跨会话持久化用户和项目记忆。相关事实、偏好和项目历史自动检索并注入提示中。包含自适应记忆策略、后台整合及可选的记忆边车服务。
 - **[2026/03/16]** **v0.3.2** 多 Claw 支持：现已支持 IronClaw、PicoClaw、ZeroClaw、CoPaw、NanoClaw 和 NemoClaw，与 OpenClaw 并列。NanoClaw 通过新增的 `/v1/messages` Anthropic 兼容端点接入；NemoClaw 通过 OpenShell 推理路由接入。新增 OpenRouter 作为受支持的 LLM 平台。
 - **[2026/03/13]** **v0.3.1** MinT 后端支持：RL 训练现同时支持 Tinker 和 MinT。通过 `rl.backend`（auto/tinker/mint）配置。
 - **[2026/03/13]** **v0.3** 持续元学习支持：慢速 RL 更新仅在睡眠时间、空闲期间或 Google Calendar 会议期间运行。新增 support/query 集分离,防止过时的奖励信号污染模型更新。
@@ -74,7 +74,7 @@ https://github.com/user-attachments/assets/d86a41a8-4181-4e3a-af0e-dc453a6b8594
 
 在底层,它将你的模型封装为 OpenAI 兼容代理（对 NanoClaw 等 Anthropic 原生 Agent 还提供 `/v1/messages` 兼容端点），通过 OpenClaw、NanoClaw、NemoClaw 等支持的 Agent 拦截实时对话,在每轮对话中注入相关 Skill,并从积累的交互经验中元学习。每次会话结束后自动总结新 Skill；开启 RL 后,元学习调度器会将权重更新推迟到空闲窗口,确保活跃使用期间不受干扰。
 
-无需 GPU 集群。MetaClaw 兼容任意 OpenAI 格式的 LLM API,并通过 Tinker 兼容后端进行云端 LoRA 微调。[Tinker](https://www.thinkingmachines.ai/tinker/) 是默认参考路径；如果需要,也可以通过单独安装的兼容包接入 MinT。
+无需 GPU 集群。MetaClaw 兼容任意 OpenAI 格式的 LLM API,并通过 Tinker 兼容后端进行云端 LoRA 微调。[Tinker](https://www.thinkingmachines.ai/tinker/) 是默认参考路径；如果需要,也可以通过单独安装的兼容包接入 MinT 或 Weaver。
 
 ## 🤖 核心功能
 
@@ -87,7 +87,10 @@ https://github.com/user-attachments/assets/d86a41a8-4181-4e3a-af0e-dc453a6b8594
 |------|------|----------|
 | `skills_only` | | 代理你的 LLM API。注入 Skill,会话结束后自动总结。无需 GPU / Tinker。 |
 | `rl` | | Skills + RL 训练（GRPO）。batch 满后立即训练。可选 OPD 进行教师蒸馏。 |
-| `madmax` | ✅ | Skills + RL + 智能调度器。RL 权重更新只在睡眠/空闲/会议窗口进行。 |
+| `auto` | ✅ | Skills + RL + 智能调度器。RL 权重更新只在睡眠/空闲/会议窗口进行。 |
+
+### **长期记忆**
+MetaClaw 可跨会话持久保存事实、偏好与项目历史，并在每轮对话中检索相关上下文注入提示——让你的 Agent 记得你说过的话，即使相隔数周。
 
 ### **完全异步设计**
 推理服务、奖励建模与训练完全解耦。Agent 持续响应的同时,打分与优化在后台并行进行。
@@ -98,6 +101,16 @@ https://github.com/user-attachments/assets/d86a41a8-4181-4e3a-af0e-dc453a6b8594
 
 ### 1. 安装
 
+**OpenClaw（一键安装）：** 请使用 [v0.4.0](https://github.com/aiming-lab/MetaClaw/releases/tag/v0.4.0) 版本：运行下方命令后执行 `metaclaw setup` 与 `metaclaw start`。更多说明（Windows、镜像、配置、排错）见 [`extensions/metaclaw-openclaw/README.md`](../extensions/metaclaw-openclaw/README.md)。
+
+```bash
+curl -LO https://github.com/aiming-lab/MetaClaw/releases/download/v0.4.0/metaclaw-plugin.zip
+unzip metaclaw-plugin.zip -d ~/.openclaw/extensions
+openclaw plugins enable metaclaw-openclaw && openclaw gateway restart
+```
+
+**pip**（PyPI 或本仓库）：
+
 ```bash
 pip install -e .                        # skills_only 模式（轻量）
 pip install -e ".[rl]"                  # + RL 训练支持（torch、transformers、tinker）
@@ -105,8 +118,26 @@ pip install -e ".[evolve]"              # + 通过 OpenAI 兼容 LLM 进行 Skil
 pip install -e ".[scheduler]"           # + Google Calendar 调度器集成
 pip install -e ".[rl,evolve,scheduler]" # 推荐：完整 RL + 调度器配置
 ```
+（可选）微信集成使用官方 @tencent-weixin/openclaw-weixin 插件。启用微信时，MetaClaw 会自动安装该插件：
 
-如果你要使用 `rl.backend=mint`,请在同一环境里额外安装 MinT 兼容包,例如 [`mindlab-toolkit`](https://github.com/MindLab-Research/mindlab-toolkit)。MetaClaw 不会把这个依赖放进默认安装中,这样 RL 用户可以明确选择 Tinker 或 MinT。
+```bash
+metaclaw config wechat.enabled true
+metaclaw start
+```
+
+该插件在 `metaclaw start` 时自动安装。你也可以手动安装：
+
+```bash
+npx -y @tencent-weixin/openclaw-weixin-cli@latest install
+```
+
+要切换微信账号（使用新的二维码重新登录）：
+
+```bash
+metaclaw start --wechat-relogin
+```
+
+如果你要使用 `rl.backend=mint`,请在同一环境里额外安装 MinT 兼容包,例如 [`mindlab-toolkit`](https://github.com/MindLab-Research/mindlab-toolkit)。如果你要使用 `rl.backend=weaver`,请另行安装 [`nex-weaver`](https://github.com/nex-agi/weaver)。MetaClaw 不会把这些依赖放进默认安装中,这样 RL 用户可以明确选择 Tinker、MinT 或 Weaver。
 
 ### 2. 配置
 
@@ -114,11 +145,14 @@ pip install -e ".[rl,evolve,scheduler]" # 推荐：完整 RL + 调度器配置
 metaclaw setup
 ```
 
-交互式向导会引导你选择 LLM 提供商（Kimi、Qwen、MiniMax 或自定义）,填写 API Key,并可选开启 RL 训练。
+交互式向导会引导你完成：
+1. **选择个人 Agent** — `openclaw`、`copaw`、`ironclaw`、`picoclaw`、`zeroclaw`、`nanoclaw`、`nemoclaw` 或 `none`（`metaclaw start` 时会自动配置）
+2. **选择 LLM 提供商** — Kimi、Qwen、OpenAI、Volcano Engine、自定义等
+3. **填写 API Key**，并可选择是否启用 RL 训练
 
-MetaClaw 的 RL 路径可以显式切换 `tinker` 和 `mint`。推荐默认值是 `auto`；当环境里安装了 MinT 兼容包时,它仍然可以根据 Mint 风格的凭证或 base URL 自动识别 MinT。
+MetaClaw 的 RL 路径可以显式切换 `tinker`、`mint` 和 `weaver`。推荐默认值是 `auto`；当环境里安装了 MinT 或 Weaver 兼容包时,它仍然可以根据对应风格的凭证或 base URL 自动识别。
 
-**Tinker**（默认）:
+**Tinker**:
 
 ```bash
 metaclaw config rl.backend tinker
@@ -135,6 +169,15 @@ metaclaw config rl.base_url https://mint.macaron.xin/
 metaclaw config rl.model Qwen/Qwen3-4B-Instruct-2507
 ```
 
+**Weaver**:
+
+```bash
+metaclaw config rl.backend weaver
+metaclaw config rl.api_key sk-...
+metaclaw config rl.base_url https://weaver-console.nex-agi.cn
+metaclaw config rl.model Qwen/Qwen3-8B
+```
+
 兼容旧配置的 `rl.tinker_api_key` 和 `rl.tinker_base_url` 仍然可以继续使用。
 
 ### 3. 启动
@@ -143,7 +186,7 @@ metaclaw config rl.model Qwen/Qwen3-4B-Instruct-2507
 metaclaw start
 ```
 
-就这些。MetaClaw 启动代理,自动配置 OpenClaw 并重启网关。打开 OpenClaw 开始对话,每轮都会注入 Skill,对话结束后自动总结为新 Skill。
+就这些。MetaClaw 启动代理，自动配置你所选的个人 Agent 并重启网关。打开你的 Agent 开始对话——每轮都会注入 Skill，会话结束后会自动总结为新 Skill。
 
 ---
 
@@ -155,30 +198,38 @@ metaclaw start
 
 ```
 metaclaw setup                  # 首次交互式配置向导
-metaclaw start                  # 启动 MetaClaw（默认 madmax 模式）
-metaclaw start --daemon         # 在后台启动 MetaClaw
-metaclaw start --daemon --log-file /tmp/metaclaw.log  # 自定义日志路径
+metaclaw start                  # 启动 MetaClaw（默认 auto 模式）
 metaclaw start --mode rl        # 本次会话强制启用 RL 模式（无调度器）
 metaclaw start --mode skills_only  # 本次会话强制仅 Skills 模式
 metaclaw stop                   # 停止正在运行的 MetaClaw 实例
 metaclaw status                 # 查看代理健康状态、运行模式与调度器状态
 metaclaw config show            # 查看当前配置
 metaclaw config KEY VALUE       # 设置配置项
+metaclaw config llm.oauth_token TOKEN               # 为当前 CLI provider 存储 OAuth token
+metaclaw auth paste-token --provider anthropic      # 存储 OAuth token（anthropic | openai-codex | gemini）
+metaclaw auth status                                # 显示所有已存储的认证配置
+metaclaw uninstall              # 删除所有 MetaClaw 数据、OpenClaw 扩展和 pip 包
 ```
 
-使用 `--daemon` 启动 MetaClaw 时，命令会等待本地代理就绪后才返回。使用 `metaclaw status` 检查状态，使用 `metaclaw stop` 停止后台进程。
+使用 `metaclaw status` 验证就绪状态，使用 `metaclaw stop` 停止进程。
 
 <details>
 <summary><b>完整配置参考（点击展开）</b></summary>
 
 ```yaml
-mode: madmax               # "madmax" | "rl" | "skills_only"
+mode: auto                 # "auto" | "rl" | "skills_only"
+claw_type: openclaw        # "openclaw" | "copaw" | "ironclaw" | "picoclaw" | "zeroclaw" | "nanoclaw" | "nemoclaw" | "hermes" | "none"
 
 llm:
-  provider: kimi            # kimi | qwen | openai | minimax | custom
+  auth_method: api_key      # "api_key" | "oauth_token"
+  provider: kimi            # kimi | qwen | openai | minimax | novita | openrouter | volcengine | custom
   model_id: moonshotai/Kimi-K2.5
   api_base: https://api.moonshot.cn/v1
   api_key: sk-...
+  # oauth_token 示例（token 通过 `metaclaw auth paste-token` 存储）：
+  # auth_method: oauth_token
+  # provider: anthropic     # anthropic | openai-codex | gemini
+  # model_id: claude-sonnet-4-6
 
 proxy:
   port: 30000
@@ -194,10 +245,10 @@ skills:
 
 rl:
   enabled: false            # 设为 true 开启 RL 训练
-  backend: auto             # "auto" | "tinker" | "mint"
+  backend: auto             # "auto" | "tinker" | "mint" | "weaver"
   model: moonshotai/Kimi-K2.5
   api_key: ""
-  base_url: ""              # 可选后端 endpoint，例如 MinT 的 https://mint.macaron.xin/
+  base_url: ""              # 可选后端 endpoint，例如 MinT 的 https://mint.macaron.xin/ 或 Weaver 的 https://weaver-console.nex-agi.cn
   tinker_api_key: ""        # api_key 的兼容别名
   tinker_base_url: ""       # base_url 的兼容别名
   prm_url: https://api.openai.com/v1
@@ -217,10 +268,13 @@ opd:
   teacher_api_key: ""       # 教师模型 API Key
   kl_penalty_coef: 1.0      # OPD 的 KL 惩罚系数
 
-max_context_tokens: 20000   # 截断前的 prompt token 上限
+max_context_tokens: 20000   # 截断前 prompt token 上限；0 表示不截断（大上下文云端模型在 skills_only 下推荐）
+                            #
+context_window: 0           # 向 Agent 声明的上下文窗口（如 OpenClaw 压缩阈值）；0 为自动
+                            # （skills_only 约 200000，rl/auto 约 32768）
 
-scheduler:                  # v0.3：元学习调度器（madmax 模式下自动启用）
-  enabled: false            # madmax 模式自动启用；rl 模式需手动设置
+scheduler:                  # v0.3：元学习调度器（auto 模式下自动启用）
+  enabled: false            # auto 模式自动启用；rl 模式需手动设置
   sleep_start: "23:00"
   sleep_end: "07:00"
   idle_threshold_minutes: 30
@@ -241,6 +295,8 @@ scheduler:                  # v0.3：元学习调度器（madmax 模式下自动
 
 最轻量的模式。无需 GPU,无需 RL 后端。MetaClaw 将你的 LLM 封装在代理后面,每轮注入相关 Skill,对话结束后自动总结新 Skill。
 
+若使用 OpenAI 兼容的自定义服务商，请将 `llm.api_base` 设为完整的对话 API 根地址（通常以 `/v1` 结尾，例如 `https://your-gateway.example/v1`）。在 `skills_only` 模式下，除非你单独配置 evolver 端点，否则 MetaClaw 会用同一地址完成提示压缩等辅助 LLM 调用。
+
 Skill 是存放在 `~/.metaclaw/skills/` 中的简短 Markdown 指令,以独立的 `SKILL.md` 文件组织。Skill 库随使用自动增长。
 
 预加载内置 Skill 库（涵盖编码、安全、Agent 任务等 40+ 个 Skill）：
@@ -255,9 +311,9 @@ cp -r memory_data/skills/* ~/.metaclaw/skills/
 
 **`metaclaw start --mode rl`**
 
-在 Skills 模式基础上,增加基于实时对话的持续 RL 微调。每轮对话被 tokenize 并作为训练样本提交。裁判 LLM（PRM）异步为回复打分,Tinker 兼容后端（Tinker 云端或 MinT）执行 LoRA 微调并热更新权重。
+在 Skills 模式基础上,增加基于实时对话的持续 RL 微调。每轮对话被 tokenize 并作为训练样本提交。裁判 LLM（PRM）异步为回复打分,Tinker 兼容后端（Tinker 云端、MinT 或 Weaver）执行 LoRA 微调并热更新权重。
 
-**Tinker**（默认）:
+**Tinker**:
 
 ```bash
 metaclaw config rl.backend tinker
@@ -275,6 +331,18 @@ metaclaw config rl.backend mint
 metaclaw config rl.api_key sk-mint-...
 metaclaw config rl.base_url https://mint.macaron.xin/
 metaclaw config rl.model Qwen/Qwen3-4B-Instruct-2507
+metaclaw config rl.prm_url https://api.openai.com/v1
+metaclaw config rl.prm_api_key sk-...
+metaclaw start --mode rl
+```
+
+**Weaver**:
+
+```bash
+metaclaw config rl.backend weaver
+metaclaw config rl.api_key sk-...
+metaclaw config rl.base_url https://weaver-console.nex-agi.cn
+metaclaw config rl.model Qwen/Qwen3-8B
 metaclaw config rl.prm_url https://api.openai.com/v1
 metaclaw config rl.prm_api_key sk-...
 metaclaw start --mode rl
@@ -303,13 +371,13 @@ metaclaw config opd.kl_penalty_coef 1.0
 
 ---
 
-## 🧠 MadMax 模式（默认）
+## 🧠 Auto 模式（默认）
 
 **`metaclaw start`**
 
 在 RL 模式基础上,增加元学习调度器,将权重更新推迟到用户不活跃的窗口,确保活跃使用期间不受干扰。这是默认模式。
 
-RL 权重热更新会暂停 Agent 数分钟。MadMax 不像 RL 模式那样 batch 满后立即训练,而是等待合适的窗口。
+RL 权重热更新会暂停 Agent 数分钟。auto 模式不像 RL 模式那样 batch 满后立即训练,而是等待合适的窗口。
 
 三种条件触发更新窗口（满足任一即可）：
 
@@ -331,6 +399,22 @@ metaclaw config scheduler.calendar.credentials_path ~/.metaclaw/client_secrets.j
 若用户在更新中途返回,部分 batch 会被保存并在下次窗口恢复。
 
 每个 `ConversationSample` 带有 `skill_generation` 版本标签。当 Skill 进化增加 generation 时,RL buffer 被清空,仅使用进化后的样本进行梯度更新（MAML support/query 集分离）。
+
+---
+
+## 🗑️ 卸载
+
+```bash
+metaclaw uninstall
+```
+
+一键删除所有内容：停止运行实例、清理 `~/.openclaw/openclaw.json` 中的 MetaClaw 引用、删除 `~/.openclaw/extensions/metaclaw-openclaw/`、删除 `~/.metaclaw/`、卸载 pip 包并重启 OpenClaw 网关。删除前会要求确认。
+
+卸载后如有克隆的源码仓库，请手动删除：
+
+```bash
+rm -rf /path/to/MetaClaw
+```
 
 ---
 
@@ -356,6 +440,7 @@ MetaClaw 基于以下开源项目构建：
 - [SkillRL](https://github.com/aiming-lab/SkillRL), 我们的 Skill 增强 RL 框架。
 - [Tinker](https://www.thinkingmachines.ai/tinker/), 用于在线 RL 训练。
 - [MinT](https://github.com/MindLab-Research/mindlab-toolkit), 在线 RL 训练的备选后端。
+- [Weaver](https://github.com/nex-agi/weaver), 在线 RL 训练的备选后端。
 - [OpenClaw-RL](https://github.com/Gen-Verse/OpenClaw-RL), 我们 RL 设计的灵感来源。
 - [awesome-openclaw-skills](https://github.com/VoltAgent/awesome-openclaw-skills), 为我们的 Skill 库提供基础。
 - [NanoClaw](https://github.com/qwibitai/nanoclaw) , qwibitai 开发的个人 Claude Agent，通过 `/v1/messages` 兼容端点接入。

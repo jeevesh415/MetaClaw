@@ -7,8 +7,6 @@ Supported agents:
   ironclaw  — patches ~/.ironclaw/.env, runs `ironclaw service restart`
   picoclaw  — patches ~/.picoclaw/config.json model_list, runs `picoclaw gateway restart`
   zeroclaw  — patches ~/.zeroclaw/config.toml, runs `zeroclaw service restart`
-  nanoclaw  — patches nanoclaw's .env (ANTHROPIC_BASE_URL), restarts via launchd/systemd
-  nemoclaw  — registers metaclaw provider in OpenShell, sets inference route
   none      — skip auto-configuration entirely
 
 Add more claws by implementing a `_configure_<name>` function and registering
@@ -17,10 +15,8 @@ it in ``_ADAPTERS``.
 
 from __future__ import annotations
 
-import datetime
 import json
 import logging
-import platform
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
@@ -166,7 +162,7 @@ def _configure_ironclaw(cfg: "MetaClawConfig") -> None:
     )
 
 
-def _patch_dotenv(env_path: Path, new_vars: dict[str, str], label: str = "IronClaw") -> None:
+def _patch_dotenv(env_path: Path, new_vars: dict[str, str]) -> None:
     """Update or insert KEY=VALUE lines in a .env file (preserves comments)."""
     lines: list[str] = []
     if env_path.exists():
@@ -198,7 +194,7 @@ def _patch_dotenv(env_path: Path, new_vars: dict[str, str], label: str = "IronCl
     try:
         env_path.parent.mkdir(parents=True, exist_ok=True)
         env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
-        logger.info("[ClawAdapter] %s .env updated: %s", label, env_path)
+        logger.info("[ClawAdapter] IronClaw .env updated: %s", env_path)
     except Exception as e:
         logger.error("[ClawAdapter] Failed to write %s: %s", env_path, e)
 
@@ -339,194 +335,6 @@ def _patch_toml(toml_path: Path, new_vars: dict[str, str]) -> None:
 
 
 # ------------------------------------------------------------------ #
-# NanoClaw adapter                                                    #
-# ------------------------------------------------------------------ #
-
-def _configure_nanoclaw(cfg: "MetaClawConfig") -> None:
-    """Auto-configure NanoClaw to route API calls through MetaClaw proxy.
-
-    NanoClaw uses an Anthropic-compatible credential proxy (credential-proxy.ts)
-    that forwards container API calls to ANTHROPIC_BASE_URL.  MetaClaw exposes
-    a /v1/messages Anthropic-compatible endpoint, so we point ANTHROPIC_BASE_URL
-    at the MetaClaw proxy and restart the service.
-
-    Config file location is discovered in priority order:
-      1. WorkingDirectory from ~/Library/LaunchAgents/com.nanoclaw.plist (macOS)
-      2. WorkingDirectory from ~/.config/systemd/user/nanoclaw.service (Linux)
-      3. Common install locations: ~/nanoclaw, ~/code/nanoclaw, ~/.nanoclaw
-    """
-    env_path = _find_nanoclaw_env()
-    if env_path is None:
-        logger.warning(
-            "[ClawAdapter] Could not locate nanoclaw .env — "
-            "set ANTHROPIC_BASE_URL=http://127.0.0.1:%d and "
-            "ANTHROPIC_API_KEY=%s in nanoclaw's .env manually.",
-            cfg.proxy_port,
-            cfg.proxy_api_key or "metaclaw",
-        )
-        return
-
-    new_vars = {
-        "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{cfg.proxy_port}",
-        "ANTHROPIC_API_KEY": cfg.proxy_api_key or "metaclaw",
-    }
-    _patch_dotenv(env_path, new_vars, label="NanoClaw")
-
-    # Restart nanoclaw via launchd (macOS) or systemd --user (Linux)
-    if platform.system() == "Darwin":
-        import os
-        uid = os.getuid()
-        _run_commands(
-            "nanoclaw",
-            [["launchctl", "kickstart", "-k", f"gui/{uid}/com.nanoclaw"]],
-            ignore_missing=True,
-        )
-    else:
-        _run_commands(
-            "nanoclaw",
-            [["systemctl", "--user", "restart", "nanoclaw"]],
-            ignore_missing=True,
-        )
-
-
-def _find_nanoclaw_env() -> Path | None:
-    """Locate nanoclaw's project-root .env file by probing known locations."""
-    home = Path.home()
-
-    # 1. macOS launchd plist → WorkingDirectory
-    plist_path = home / "Library" / "LaunchAgents" / "com.nanoclaw.plist"
-    if plist_path.exists():
-        try:
-            import plistlib
-            with open(plist_path, "rb") as f:
-                plist = plistlib.load(f)
-            work_dir = plist.get("WorkingDirectory")
-            if work_dir:
-                candidate = Path(work_dir) / ".env"
-                if candidate.parent.is_dir():
-                    return candidate
-        except Exception as e:
-            logger.debug("[ClawAdapter] failed to parse nanoclaw plist: %s", e)
-
-    # 2. Linux systemd service → WorkingDirectory=
-    service_path = home / ".config" / "systemd" / "user" / "nanoclaw.service"
-    if service_path.exists():
-        try:
-            for line in service_path.read_text(encoding="utf-8").splitlines():
-                stripped = line.strip()
-                if stripped.startswith("WorkingDirectory="):
-                    work_dir = stripped.split("=", 1)[1].strip()
-                    candidate = Path(work_dir) / ".env"
-                    if candidate.parent.is_dir():
-                        return candidate
-        except Exception as e:
-            logger.debug("[ClawAdapter] failed to parse nanoclaw service file: %s", e)
-
-    # 3. Common install locations (check for existing .env or at least the dir)
-    for candidate in [
-        home / "nanoclaw" / ".env",
-        home / "code" / "nanoclaw" / ".env",
-        home / ".nanoclaw" / ".env",
-    ]:
-        if candidate.exists() or candidate.parent.is_dir():
-            return candidate
-
-    return None
-
-
-# ------------------------------------------------------------------ #
-# NemoClaw adapter                                                    #
-# ------------------------------------------------------------------ #
-
-def _configure_nemoclaw(cfg: "MetaClawConfig") -> None:
-    """Auto-configure NemoClaw to route inference through MetaClaw proxy.
-
-    NemoClaw runs OpenClaw inside an OpenShell sandbox with a pluggable
-    inference provider.  We register (or update) a 'metaclaw' OpenAI-compatible
-    provider via the openshell CLI and set it as the active inference route.
-    The config is also persisted to ~/.nemoclaw/config.json so that
-    `openclaw nemoclaw status` reflects the current state.
-    """
-    model_id = cfg.llm_model_id or cfg.served_model_name or "metaclaw-model"
-    api_key = cfg.proxy_api_key or "metaclaw"
-    base_url = f"http://127.0.0.1:{cfg.proxy_port}/v1"
-
-    # Step 1: Register (or update) the metaclaw provider in OpenShell
-    create_cmd = [
-        "openshell", "provider", "create",
-        "--name", "metaclaw",
-        "--type", "openai",
-        "--credential", f"OPENAI_API_KEY={api_key}",
-        "--config", f"OPENAI_BASE_URL={base_url}",
-    ]
-    try:
-        result = subprocess.run(
-            create_cmd, capture_output=True, text=True, timeout=15,
-        )
-        if result.returncode != 0:
-            stderr = result.stderr or ""
-            if "AlreadyExists" in stderr or "already exists" in stderr.lower():
-                logger.info("[ClawAdapter] openshell provider 'metaclaw' exists — updating")
-                _run_commands("nemoclaw", [[
-                    "openshell", "provider", "update", "metaclaw",
-                    "--credential", f"OPENAI_API_KEY={api_key}",
-                    "--config", f"OPENAI_BASE_URL={base_url}",
-                ]])
-            else:
-                logger.warning(
-                    "[ClawAdapter] openshell provider create failed: %s",
-                    stderr.strip(),
-                )
-                return
-        else:
-            logger.info("[ClawAdapter] openshell provider create metaclaw → ok")
-    except FileNotFoundError:
-        logger.warning(
-            "[ClawAdapter] 'openshell' not found in PATH — configure NemoClaw manually."
-        )
-        return
-    except Exception as e:
-        logger.warning("[ClawAdapter] openshell provider create error: %s", e)
-        return
-
-    # Step 2: Set inference route to the metaclaw provider
-    _run_commands("nemoclaw", [[
-        "openshell", "inference", "set",
-        "--provider", "metaclaw",
-        "--model", model_id,
-    ]])
-
-    # Step 3: Persist ~/.nemoclaw/config.json
-    _write_nemoclaw_config(base_url, model_id, api_key)
-
-    # Step 4: Restart openclaw gateway inside the sandbox (best-effort)
-    _run_commands("nemoclaw", [["openclaw", "gateway", "restart"]], ignore_missing=True)
-
-
-def _write_nemoclaw_config(endpoint_url: str, model: str, api_key: str) -> None:
-    """Write ~/.nemoclaw/config.json to record MetaClaw as the active provider."""
-    config_path = Path.home() / ".nemoclaw" / "config.json"
-    data = {
-        "endpointType": "custom",
-        "endpointUrl": endpoint_url,
-        "ncpPartner": None,
-        "model": model,
-        "profile": "ncp",
-        "credentialEnv": "OPENAI_API_KEY",
-        "onboardedAt": datetime.datetime.utcnow().isoformat() + "Z",
-    }
-    try:
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        config_path.write_text(
-            json.dumps(data, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
-        logger.info("[ClawAdapter] NemoClaw config updated: %s", config_path)
-    except Exception as e:
-        logger.error("[ClawAdapter] Failed to write %s: %s", config_path, e)
-
-
-# ------------------------------------------------------------------ #
 # Noop adapter                                                        #
 # ------------------------------------------------------------------ #
 
@@ -544,8 +352,6 @@ _ADAPTERS: dict[str, Callable[["MetaClawConfig"], None]] = {
     "ironclaw": _configure_ironclaw,
     "picoclaw": _configure_picoclaw,
     "zeroclaw": _configure_zeroclaw,
-    "nanoclaw": _configure_nanoclaw,
-    "nemoclaw": _configure_nemoclaw,
     "none": _configure_none,
 }
 

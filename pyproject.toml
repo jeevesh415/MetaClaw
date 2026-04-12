@@ -3,8 +3,8 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "metaclaw"
-version = "0.3.0"
+name = "aiming-metaclaw"
+version = "0.4.1"
 description = "OpenClaw skill injection and RL training — one-click deployment"
 requires-python = ">=3.10"
 dependencies = [
@@ -53,6 +53,9 @@ metaclaw = "metaclaw.cli:metaclaw"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["metaclaw*"]
+
+[tool.setuptools.package-data]
+metaclaw = []
 
 [tool.ruff]
 line-length = 120
